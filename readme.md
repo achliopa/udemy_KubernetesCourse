@@ -105,3 +105,12 @@ Kubernetes can run:
 * kops = Kubernetes operations
 * it is used to setup k8s on AWS
 * the tool allows to do production grade k8s installations, upgrades and management
+* kops only works on mac or linux
+
+### Lecture 12 - Demo: Preparing Kops Install
+
+* with virtualbox installed on our machine we will start a VM on our host using vagrant
+* we setup a folder `mkdir ~/workspace/vms/ubuntu` and move in it
+* we install vagrant `sudo apt get install vagrant`
+* we run `vagrant init ubuntu/xenial64`
+* a Vagrantfile gets added in the folder. we run `vagrant up` to launch the vm
