@@ -87,7 +87,7 @@ Kubernetes can run:
 * new docker versions allow installing k8s with docker client
 * it is enabled from docker CE executable in MAC and Windows. not available in Linux
 * it starts a standalone kubernetes cluster
-* in kubernetes from docker if we issue `kubctl get nodes` in host we get docker-for-desktop 
+* in kubernetes from docker if we issue `kubectl get nodes` in host we get docker-for-desktop 
 * if we run also minikube we ll see 2 nodes and 2 contexes if we issue `kubectl config get-contexts`
 * to select between multiple context we use `kubectl config use-context <context name from list>`
 
@@ -169,7 +169,7 @@ vagrant ssh
 * we create a new set of keys to be able to login to the cluster `ssh-keygen -f .ssh/id_rsa`
 * we get the public key to upload it to our instances `cat .ssh/id_rsa.pub`
 * we rename the kops runtime for ease of use `sudo mv /usr/local/bin/kops-linux-amd64 /usr/local/bin/kops`
-* we can use kops to create a cluster on aws with 1 master and 2 nodes `kops create cluster --name=k8s.agileng.io --state=s3://kops-state-4213432 --zones=eu-central-1 --node-count=2 --node-size=t2.micro --master-size=t2.micro --dns-zone=k8s.agileng.io`
+* we can use kops to create a cluster on aws with 1 master and 2 nodes `kops create cluster --name=k8s.agileng.io --state=s3://kops-state-4213432 --zones=eu-central-1a --node-count=2 --node-size=t2.micro --master-size=t2.micro --dns-zone=k8s.agileng.io`
 * everytime we want to chane the cluster state we need to dd the s3 state bucket
 ```
 kops update cluster k8s.agileng.io --yes --state=s3://kops-state-4213432 
@@ -183,7 +183,7 @@ kops delete cluster k8s.agileng.io --yes --state=s3://kops-state-4213432
 * we use kubectl `kubectl get node` to see the nodes on aws
 * we will run the same deployment as we run on minikube or our dev machine to test that the aws k8s cluster is working
 * kubectl is conneted to our remote cluster. we use `kubectl run hello-minicube --image=k8s.gcr.io/echoserver:1.4 --port=8080` to create adeployment on cluster
-* we expose this deployment in the cluster using the dev service NodePort `kubectl expose deployment hello-minicube --type=NodePort`
+* we expose this deployment in the cluster using the dev service NodePort `kubectl expose deployment hello-minicube --type=NodePort`get nodes
 * we can connect in this way to every node on the exposed port except the master
 * if we run `kubectl get services` we see the running k8s service and the port we can use to access it
 * we go to AWS EC2 to see our 3 running instances in our region (zone of choice)
@@ -306,3 +306,69 @@ spec:
 	* kubectl run -i --tty busybox --image=busybox --restart=Never -- sh : run a shell in a pod. useful for debugging
 
 ### Lecture 21  - Demo: Running first app on kubernetes
+
+* we have already cloned the course repo in our course dir
+* we start minikube `minikube start`
+* we test that minikube is up `kubectl get node`
+* we open /first-app dir at courseRepo
+* we check the helloworld pod yaml file `cat helloworld.yml`
+* we create the pod in the minikube cluster `kubectl create -f helloworld.yml`
+* we use `kubectl describe pod nodehelloworld.example.com` to see the details
+* we use port-forward to forward the pod port to the world `kubectl port-forward nodehelloworld.example.com 8082:3000`
+* this does the forward till we ctrl+c the process
+* in another terminal we test with `curl localhost:8082`
+* the proper way is to use a service or loadbalanbcer that it runs in longterm e.g NodePort `kubectl expose pod nodehellorld.example.com --type=NodePort --name nodehelloworld-service` to see the ip we run `kubectl get service` or `minikube service nodehelloworld-service --url` we hit the url in borwser
+* minikube address on host is always 192.168.99.100
+
+### Lecture 22 - Demo: useful Commands
+
+* attaqch to our pod `kubectl attach nodehelloworld.example.com`
+* exec a command in pod `kubectl exec nodehelloworld.example.com -- ls /app` executes a command in the pod
+* we can describe a service as well `kubectl describe service nodehelloworld-service` we see the internal in-cluster url of the service
+* we will launch a busybox pod to listen to the service `kubectl run -i --tty busybox --image=busybox --restart=Never -- sh` we get a shell. we dont have curl so we 
+`telnet  172.17.0.16 3000
+GET /
+` and see the html reply
+
+### Lecture 23 - Service with LoadBalancer
+
+* we will set a load-balancer for the first-app
+* in real world we need to safely access the app from outside the cluster
+* on AWS we can easily add an external Load Balancer
+* it will direct traffic to the correct pod in K8s 
+* we can run our own haproxy / nginx LB in front of our cluster
+* we use a second yaml config file for the load balancer service 'helloworld-service.yml' it of type LoadBalancer which inb AWS is implemented as ELB service (Elastic Load Balancer)
+
+### Lecture 24 - Demo: Service with AWS ELB LoadBalancer
+
+* we log in to the vagrant box
+* we clone the course repo in the box
+* in first-app dir we see the 2 cofig scripts for pod and for service
+* the target port of the load balcer sercie is the pod port (ref by name)
+* we use `kubectl create -f first-app/helloworld.yml` and `kubectl create -f first-app/helloworld-service.yml` 
+* MAKE SURE TO START A CLUSTER WITH KOPS first
+```
+kops create cluster --name=k8s.agileng.io --state=s3://kops-state-4213432 --zones=eu-central-1 --node-count=2 --node-size=t2.micro --master-size=t2.micro --dns-zone=k8s.agileng.io
+
+kops update cluster k8s.agileng.io --yes --state=s3://kops-state-4213432
+```
+* wait for cluster to start...
+* run kubectl create when nodes are ready
+* in AWS console we see an ELB instance is created (in new accounts we need to create and delete an ELB first)
+* LB listens to port 80 and routes traffic to our 2 node  instances at port 30020
+* ELB has a DNS name so we can add it in Route53 in our hosted zone adding a record set helloworld.k8s.agileng.io to point to the alias dns ab819b031fd8911e89914029cfdc45df-218049082.eu-central-1.elb.amazonaws.com
+* we can use it in our browser to route to our app
+* LB has its own security group connected with the cluster security group
+* we delete the cluster 'kops delete cluster k8s.agileng.io --yes --state=s3://kops-state-4213432 ' to avoid charges
+
+### Lecture 25 - Recap: Introduction to Kubernetes
+
+* to expost a pod:
+	* with command port-forword
+	* with a service: nodeport or loadbalancer
+
+## Section 2 - Kubernetes basics
+
+### Lecture 26 - Node Architecture
+
+* 
