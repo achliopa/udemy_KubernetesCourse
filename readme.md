@@ -371,4 +371,107 @@ kops update cluster k8s.agileng.io --yes --state=s3://kops-state-4213432
 
 ### Lecture 26 - Node Architecture
 
-* 
+* a pod can have multiple containers. the containers can communicate to each other using localhost and a port number
+* pods within a cluster can communicate with each other. this communication goes over the virtual cluster network. they use service discovery
+* the containers in the pods run using docker. each node must have docker installed
+* in each node the following services run
+	* kubelet : launches the pods getting pod related info from the master node
+	* kube-proxy : feeds info about running pods in the node to the iptables (obkect in node)
+	* iptables: is a linux firewall routing traffic using a set of rules. rules are updated by kube-proxy
+* external comm to cluster is possible with an external service like load balancer. load balancer is publicly available and forwards com to the cluster. it has a list of nodes and traffi is routed to each node's iptable. iptables forward traffic to the pods
+* a pod yaml config file has the spec of the container it has. if it has multiple contianers the spec also has multiple container definitions
+
+### Lecture 27 - Scaling Pods
+
+* if our app is *stateless* we can scale it horizontally
+* Stateless = our app does not have a state. not writing to local files/ keeping sessions
+* so if no pod has a state. our app is stateless
+* traditional DBs are stateful. the DB files cant be split over multiple instances
+* web apps canbe stateless. (session management needs to be done out of the container). do not store user data in the container (use redis or cache)
+* any files that need to be saved cant be saved locally on the container (e.g S3)
+* Stateless app = if we run it multiple times it does not change state
+* To run stateful apps we can use volumes. these apps cannot horizontally scale. we can scale them in a single container. but allocate more resources.
+* Scalling in Kubernetes can be done using the Replication Controller
+* Replication Controiller ensures a specified num of pod replicas run at all time
+* A pod created with the replica controller will automatically be replaced if they fail, get deleted or is terminated. is good if we want to make sure uptime
+* to replicate an app 2 times istead of pod config we write a repcontroller config. template has the pod definition
+```
+apiVersion: v1
+kind: ReplicationController
+metadata:
+	name: helloworld-controller
+spec:
+	replicas; 2
+	selector:
+		app: helloworld
+	template:
+		metadata:
+			labels:
+				app: helloworld
+		spec:
+			containers:
+			- name: k8s-demo
+			  image: wardviaene/k8s-demo
+			  ports:
+			  -	contianerPort: 3000
+```
+
+### Lecture 28 - Demo: Replication Controller
+
+* we start our minikube cluster
+* our config is in ./CourseRepo/replication-controller/helloworld-repl-controller.yml
+* we use the config to create a rep controller in the cluster `kubectl create -f ./CourseRepo/replication-controller/helloworld-repl-controller.yml
+`
+* we check `kubectl get pods` and see the 2 pods. we see the controller with `kubectl get rc`
+* if we describe one of them `kubectl describe pod <pod name>` we see it has a controller attached
+* we delete a pod and it is restarted
+* we can overwrite the replicas number with the command `kubectl scale --replicas=4 -f ./CourseRepo/replication-controller/helloworld-repl-controller.yml`
+* if we get the controller name with `kubectl get rc` we get `kubectl scale --replicas=1 rc/helloworld-controller`
+* Replication controller is useful for Horizontal Scalling. in Stateless Apps
+* we can delete the rc by name `kubectl delete rc/helloworld-controller`
+
+### Lecture 28 - Deployments
+
+* *Replication Set* is the next-gen Replication Controller
+* it supports a new selector that can select based on filtering of a set of values e.g "environment" to be either "qa" or "prod"
+* Replication Controller selects only based on equality ==
+* The Deployment kubernetes object uses Replication Set
+* A *Deployment* declaration in Kubernetes allows us to do app deployments and updates
+* The Deployment object defines app state
+* Kubernetes then makes sure our cluster matches with the desired state
+* Deployment object gives many possiblities over Replication Set or Controller. We can:
+	* Create a dployment
+	* Update a Deployment
+	* Do rolling updates (zero downtime deployment in steps)
+	* Roll back to prev deployment
+	* Pause/Resume a deployment (to roll-out only a certain %)
+* example deployment config yaml file
+```
+appVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+	name: helloworld-deployment
+spec:
+	replicas: 3
+	template:
+		metadata:
+			labels:
+				app: helloworld
+		spec:
+			containers:
+			- name: k8s-demo
+			 image: wardviaene/k8s-demo
+			 ports:
+			 - containerPort: 3000
+```
+* spec says 3 replicas of the speced pod
+* Useful deployment commands
+	* kubectl get deployments : get info on current deployments
+	* kubectl get rs : get info on replica sets used by deployments
+	* kubectl get pods --show-labels : get pods and also labels attached to the pods
+	* kubectl rollout status deployment/<deploymentname> : get deployment status
+	* kubectl set image deployment/<deploymentname> <containername>=<imagename>:<versionnum> : run <containername> with the image <imagename> version <versionnum>
+	* kubectl edit deployment/<deploymentname> : edit the deployment object
+	* kubectl rollout history deployment/<deploymentname> : get the rollout history
+	* kubectl rollout undo deployment/<deploymentname> : rollback to previous version
+	* kubectl rollout undo deployment/<deploymentname> --to-revision=n: rollback to revision n
