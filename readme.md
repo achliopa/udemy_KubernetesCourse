@@ -430,7 +430,7 @@ spec:
 * Replication controller is useful for Horizontal Scalling. in Stateless Apps
 * we can delete the rc by name `kubectl delete rc/helloworld-controller`
 
-### Lecture 28 - Deployments
+### Lecture 29 - Deployments
 
 * *Replication Set* is the next-gen Replication Controller
 * it supports a new selector that can select based on filtering of a set of values e.g "environment" to be either "qa" or "prod"
@@ -475,3 +475,87 @@ spec:
 	* kubectl rollout history deployment/<deploymentname> : get the rollout history
 	* kubectl rollout undo deployment/<deploymentname> : rollback to previous version
 	* kubectl rollout undo deployment/<deploymentname> --to-revision=n: rollback to revision n
+
+### Lecture 30 - Demo: Deployment
+
+* in CourseRepo there is a deployment/helloworld.yml yaml file with a deployment config
+* we start minikube and deploy it with `kubectl create -f deployment/helloworld.yml`
+* we see the deployment with `kubectl get deployments`
+* we can see the replica sets inthe deployment with `kubectl get rs`
+* we see pods w/ labels with `kubectl get pods --show-labels`
+* we see rollout status with `kubectl rollout status deployment/helloworld-deployment`
+* we expose deployed pod to outside world `kubectl rollout status deployment/helloworld-deployment`
+* we get service url with `kubectl describe service helloworld-deployment`
+* to get external url `minikube service helloworld-deployment --url` we visit it and see the message in browser
+* we set a new image to deployment with a command `kubectl set image deployment/helloworld-deployment k8s-demo=wardviaene/k8s-demo:2`
+* we see the rollowut status and see the deployment history `kubectl rollout history deployment/helloworld-deployment` and see the hoistory. 
+* in order to see the changes in history when we deploy with kubectl create -f we should use the flag --record
+* to undo last deployment `kubectl rollout undo deployment/helloworld-deployment`
+* deployment history keepsonly last 2 revisions. to change that we need to mod the deployment config file. in spec: we need to add revisionHistoryLimit: 100
+* to edit changesusing vim we `kubectl edit deployment/helloworld-deployment`
+* we set again teh image to add more revisions
+
+### Lecture 31 - Services
+
+* pods are dynamic, they can come and go in the cluster
+* if we use a Replication Controller, pods are terminated and created during scaling operations
+* in Deployments, when updating the image version, pods are terminated and replaced
+* Pods should never be accessed directly but only through Services
+* Service is the logical bridge between pods and users or other serivces
+* kubectl expose creates a service
+* A service creates an endpoint for a pod. Service types that create Virtual Ip for pods are:
+	* ClusterIP: a virtual IP address only reachable within the cluster
+	* NodePort: a port same on each node and reachable externally (not for production)
+	* LoadBalancer: it is created by the cloud provider that will route external traffiv to every node on the NodePort
+* There is possibility to use DNS names:
+	* ExternalName: if added to service definition provides a DNS name for the service (e.g for service discovery with DNS)
+	* We must enable DNS add-on to use it
+* Service yaml file definition sample
+```
+apiVersion: v1
+kind: Service
+metadate:
+	name: helloworld-service
+spec:
+	ports:
+	- port: 31001
+	  nodePort: 31001
+	  targetPort: nodejs-port
+	  protocol: TCP
+	selector:
+		app: helloworld
+	type: NodePort
+```
+* in NodePort nodePort usually is autoassigned
+* by default service runs between ports 30000-32767. this can change adding --service-node-port-range= argument in the kube-apiserver (init scripts)
+
+### Lecture 32 - Demo:Services
+
+* with minikube running
+* from first-app in CourseRepo we create a pod with helloworld.yml file `kubectl create -f first-app/helloworld.yml `
+* we describe the pod `kubectl describe pod nodehelloworld.example.com` its port is 3000 which is named nodejs-port in the defin yaml file. we export it with the service in helloword-nodeport-service.yml `kubectl create -f first-app/helloworld-nodeport-service.yml`
+* we find teh url of the service `minikube service helloworld-service --url`
+* CLUSTER-IP is a virtual ip available only in the cluster. if we dont define it inthe YAML file the ip is not static
+
+### Lecture 33 - Labels
+
+* Labels: key/value pairs that can be attached to objects
+* used to tag resources. like tags in cloud providers
+* we can label our objects. e.g a pod, follwoing an organizational struct e.g key: environment - value: dev / staging/ qa/ prod key: department - value: eng/fin/mark
+* labels are not unique. multiple labels can be  added to one object
+* once attached to the object. we can use them in filters (Label Selectors)
+* in Label Selectors we can use matching expresions to match labels. e.g a pod can only run in a node labeled environment == development. (tag the node, use nodeSelector in pod config)
+* we can tag nodes or services.
+* to tag nodes we can use kubectl `kubectl label nodes node1 hardware=high-spec`
+* use labels  in pod definition
+```
+nodeSelector:
+	hardware: high-spec
+```
+
+### Lecture 34 - Demo: NodeSelector using Labels
+
+* we use minikube
+* in COurseRepo in deployment/ he have a pod definition 'helloworld-nodeselector.yml' that can a nodeSelector
+* we create a deployment with it `kubectl create -f deployment/helloworld-nodeselector.yml` our pods are pending as our node (minikube) is not taggged as high-spec
+* we add a label to node programmatically `kubectl label nodes minikube hardware=high-spec` our pods are running now
