@@ -906,4 +906,46 @@ subjects:
 
 ### Lecture 48 - Service Discovery
 
+* Since Kubernetes 1.3 DNS is a built-in service launched automatically using the addon manager.
+* It can be used for service discovery using DNS
+* the addons are in /etc/kubernetes/addons dir on master node
+* DNS service can be used within pods to find other services running on the same cluster
+* containers in a pod dont need it. the communicate with each other direclty with localhost:port
+* to make DNS work a pod will always nedd a Service definition
+* each pod gets its own ip in the cluster from the attached service. the service name attached to the pod is used by DNS so that apps in pods can communicate with each other
+* `host app2-service` command returns the IP address of app2 serivce
+* DNS discovery using serivce name works if both are in the same namespace
+* `host app2-serivce.default` looks in default namespace for the service
+* the full dns on a cluster node is `host app2-service.default.svc.cluster.local` it resolves in the IP address
+* how DNS works in cluster??? to see it we lauch a dummy pod `kubectl run -i -tty busybox --image=busybox --restart=Never -- sh`. 
+* in the containers shell we run `cat /etc/resolv.conf`
+* what we get are the credentials (IP address) on the DNS nameserver. the kube-dns serivce running (DNS Server) in the kube-system namespace. to see it in get pods we need the flag -n kube-system
+
+### Lecture 49 - Demo: Service Discovery
+
+* in CourseRepo we see the folder service-discovery
+* it has a secrets.yml filesetting a num of key value pairs like username password and database using base64 strings
+* we apply it in minikube on host `kubectl create -f service-discovery/secrets.yml`
+* database.yml creates a database pod (mysql) and database-service.yml a db servoce for the pod. we apply them both on minikube. service exposes a port with nodeport
+* we apply a hellowworld-db.yml deployment for a node,js app that connects to db
+* we use `command: ["node", "index-db.js"]` to execute an alternate command in standard tutors image
+* it also sets a num of env vars based on secrets to connect to db
+* MYSQL_HOST env var is of particular insterest as its value is the service-name. this needs DNS service so that node.js will connect to db service by name
+* we createa nodeport service for the node.js helloworld pod
+* we get the url at `minikube service helloworld-db-service --url` open it with browser and SUCCESS
+* we connect to the bg container `kubectl exec database -i -t -- mysql -u root -p` pswd is rootpassowrd
+```
+mysql> show databases;
+mysql> use helloworld;
+mysql> show tables;
+mysql> select * from visits;
+mysql> \q
+```
+* to test dns we log in to a busybox container `kubectl run -i --tty busybox --image=busybox --restart=Never -- sh`. busybox has nslookup we use it to test dns `nslookup helloworld-db`
+* it fails as we need to set 'default.svc.cluster.local ' in /etc/resolf.conf
+* we try `nslookup -type=a database-service.default.svc.cluster.local` and it works
+* better use host. more stable
+
+### Lecture 50 - ConfigMap
+
 * 
