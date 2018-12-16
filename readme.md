@@ -378,7 +378,7 @@ kops update cluster k8s.agileng.io --yes --state=s3://kops-state-4213432
 	* kubelet : launches the pods getting pod related info from the master node
 	* kube-proxy : feeds info about running pods in the node to the iptables (obkect in node)
 	* iptables: is a linux firewall routing traffic using a set of rules. rules are updated by kube-proxy
-* external comm to cluster is possible with an external service like load balancer. load balancer is publicly available and forwards com to the cluster. it has a list of nodes and traffi is routed to each node's iptable. iptables forward traffic to the pods
+* external comm to cluster is possible with an external service like load balancer. load balancer is publicly available and forwards com to the cluster. It has a list of nodes and traffic is routed to each node's iptable. iptables forward traffic to the pods
 * a pod yaml config file has the spec of the container it has. if it has multiple contianers the spec also has multiple container definitions
 
 ### Lecture 27 - Scaling Pods
@@ -555,7 +555,355 @@ nodeSelector:
 
 ### Lecture 34 - Demo: NodeSelector using Labels
 
-* we use minikube
-* in COurseRepo in deployment/ he have a pod definition 'helloworld-nodeselector.yml' that can a nodeSelector
+* we use minikube. nodeselector makes sense in m,ulti node clusters
+* in COurseRepo in deployment/ he have a pod definition 'helloworld-nodeselector.yml' that has a nodeselector section added to the deployment config. the containers can run oinly in nodes labeled as high-spec
 * we create a deployment with it `kubectl create -f deployment/helloworld-nodeselector.yml` our pods are pending as our node (minikube) is not taggged as high-spec
 * we add a label to node programmatically `kubectl label nodes minikube hardware=high-spec` our pods are running now
+
+### Lecture 35 - Healthchecks
+
+* helathchecks are need for production apps
+* if our app malfunctions, the pod and container can still be running but the app might not work anymore.
+* to detect and resolve problems with the app we can run healthchecks
+* there are 2 types of healthchecks
+	* run a command in the container periodically
+	* periodic checks on a URL (HTTP)
+* a production app with a loadbalancer shold always have healthchecks implemented in a way to ensure availability and resiliency
+* to add a healthcheck in a pod config
+```
+livenessProbe:
+	httpGet:
+		path: /
+		port: 3000
+	initialDelaySeconds: 15
+	timeoutSeconds: 30
+```
+* usually we use a special url path for healthchecks
+
+### Lecture 36 - Demo: Healthchecks
+
+* in CourseRepo/deployment there is a helloworld-healthcheck.yml deployment config file w/ health checks added
+* we run it in minikube with `kubectl create -f deployment/helloworld-healthcheck.yml`
+* to see the pods `kubectl get pods`
+* if we describe a pod `kubectl describe pod helloworld-deployment-77664648b9-9jgd2` we see the liveness http link
+* if the liveness check fails (k8s runs it periodically every specifdied seconds) the pod restarts
+* to change the liveness settings we run `kubectl edit <deployment config yaml file>`
+
+### Lecture 37 - Readiness Probe
+
+* apart from livenessProbes we can use readinessProbes on a container within a Pod
+* livenessProbes: indicates if a container is running, if check fails the container is restarted
+* readinessProbes: indicates if the container is ready to serve requests. if check fails container is not restarted but the POD Ip address is removed from Service, so it does not serve  requests anymore
+* readiness tests makes sure that at startup the pod only gets traffic if the test succeeds
+* both probes can be used togeether. custom tests can be configured. 
+* if container exits when sthing goes wrong we dont need liveness probe.
+
+### Lecture 38 - Demo: Liveness and Readiness Probe
+
+* we can chain commands with && `kubectl create -f helloworld-healthcheck.yml && watch -n1 kubectl get pods` runs deployment AND monitors the creation by attaching to the get pods output
+* pods are stated immediantely (no check at startuP)
+* we run both probes with a deployment config file `kubectl create -f helloworld-liveness-readiness.yml && watch -n1 kubectl get pods` where the pod startup goes at running state but is not ready at once as checks run
+* the config file is
+```
+          containerPort: 3000
+        livenessProbe:
+          httpGet:
+            path: /
+            port: nodejs-port
+          initialDelaySeconds: 15
+          timeoutSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: nodejs-port
+          initialDelaySeconds: 15
+          timeoutSeconds: 30
+```
+* using same url for liveness and readiness will cause a restart even at startup
+
+### Lecture 39 - Pod State
+
+* we will see the different pod and container states
+	* Pod Status: high level status (STATUS in kubectl get pods list)
+	* Pod Condition: condition of the pod
+	* Container State: state of container
+* Pod Status: STATUS
+	* Running: pod is bound to a node, all containers have been created, at least one container is still running or starting/restarting
+	* Pending: Pod is accepted but not running (e.g container image downloading, pod cannot be scheduled because of resource constrains)
+	* Succeeded: all containers in the pod have terminated successfully and wont be restarted
+	* Failed: all containers in pod terminated and >= container returned failure code
+	* Unknown: pod state cant be determined (eg network error)
+* Pod Conditions: we can see them with kubectl describ epod. they are conditions the pod has passed
+	* Initialized: initialization containers have started successfully
+	* Ready: pod can serve requests and will be added to matching services
+	* PodScheduled: pod has been scheduled to a node
+	* Unschedulable: pod cannod be scheduled *e.g resource constrains)
+	* ContainersReady: all containers in pod  ready
+* Container State: we see it with `kubectl get pod <PODNAME> -o yaml` as containerStatuses
+	* this is docker report
+	* Possible Container states: Running, Terminated, Waiting
+
+### Lecture 40 - Pod Lifecycle
+
+* when we launch a Pod:
+	* init container runs (if it is secified in pod config). it does some setup (e.g in volumes) PodScheduled=True
+	* main container runs (after init container if any  termiantes) Initialized=True
+	* main contaner has 2 hookd for scripts: ost start hook and prestop hook
+	* in main container run after an initialDelaySeconds probes run Ready=True
+
+### LEcture 41 - Demo: Pod Lifecycle
+
+* in CourseRepo we cd in pod-lifecycle
+* in the deployment config file we set the init container pobes and hooks with custom commands
+```
+kind: Deployment
+apiVersion: apps/v1beta1
+metadata:
+  name: lifecycle
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: lifecycle
+    spec:
+      initContainers:
+      - name:           init
+        image:          busybox
+        command:       ['sh', '-c', 'sleep 10']
+      containers:
+      - name: lifecycle-container
+        image: busybox
+        command: ['sh', '-c', 'echo $(date +%s): Running >> /timing && echo "The app is running!" && /bin/sleep 120']
+        readinessProbe:
+          exec:
+            command: ['sh', '-c', 'echo $(date +%s): readinessProbe >> /timing']
+          initialDelaySeconds: 35
+        livenessProbe:
+          exec:
+            command: ['sh', '-c', 'echo $(date +%s): livenessProbe >> /timing']
+          initialDelaySeconds: 35
+          timeoutSeconds: 30
+        lifecycle:
+          postStart:
+            exec:
+              command: ['sh', '-c', 'echo $(date +%s): postStart >> /timing && sleep 10 && echo $(date +%s): end postStart >> /timing']
+          preStop:
+            exec:
+              command: ['sh', '-c', 'echo $(date +%s): preStop >> /timing && sleep 10']
+
+```
+
+* we deply the file `kubectl create -f lifecycle.yaml` while watching for pod status `watch -n1 kubectl get pods`
+* we see the logs with `kubectl  exec -it lifecycle-7d55f6f67-zt2vt  -- cat timing
+` timining is the file where custom commnads in the yaml config output their logs
+```
+1544980284: Running
+1544980284: postStart
+1544980294: end postStart
+1544980325: readinessProbe
+1544980327: livenessProbe
+1544980335: readinessProbe
+1544980337: livenessProbe
+1544980345: readinessProbe
+1544980347: livenessProbe
+```
+
+### Lecture 42 - Secrets
+
+* Secrets provide a way in k8s to deistribute credentials, keys, paswords or 'secret' data to pods
+* kubernetes itself uses Secrets to provide credentials to access the internal API
+* we can use Secrets to provide secret data to our app
+* Secrets are Kubernetes native. there are other ways the contianer can get its secrets eg. external vault services
+* Secrets can be used for:
+	* As environment vars
+	* As a file in a pod (this setup uses volumes with files mounted to the container). it can be used for dotenv files or standard files the app reads
+	* Use an external image to pull secrets (from aprivate image registry not dockerhub)
+* First we must generate the secrets
+	* to generate secrets using files
+	```
+	echo -n 'root' > ./username.txt
+	echo -n 'password' > ./password.txt
+	kubectl create secret generic db-user-pass --from-file=./username.txt --from-file=./password.txt
+	>> secret 'db-user-pass' created
+	```
+	* a secret can be an SSH key or SSL certificate
+	```
+	kubectl create secret generic ssl-certificate --from-file=ssh-privatekey=~/.ssh/id_rsa  --sl-cert-=mysslcert.crt
+	```
+	* we can generate secrets using yaml definitions e.g 'secrets-db-secret.yaml'
+* typically sensitive data are used in yaml config files as base64 strings
+```
+apiversion: v1
+kind: Secret
+metadata:
+	name: db-secret
+type: Opaque
+data:
+	password: cm9vdA==
+	username: cGFzc3dvcmQ=
+```
+* to make base64 strings
+```
+echo -n "root" | base64
+>> cm9vdA==
+echo =n "password" | base64
+>> cGFzc3dvcmQ=
+```
+* after creating the yml file we can use kubectl create
+```
+kubectl create -f secrets-db-secret.yml
+```
+* after secrets are created we can use them
+* if we want to use secrets as env variables we can use a pod to expose them as env vars
+* its config will contains in the container spec
+```
+env:
+	- name: SECRET_USERNAME
+	  valueFrom:
+	  secretKeyRef:
+	  	name: db-secret
+	  	key: username
+	 - name: SECRET_PASSWORD
+	 ...
+```
+* in Secrets vals are stored a s key value pairs
+* we can provide also the secrets in a file
+```
+volumeMounts:
+- name: credvolume
+  mountPath: /etc/creds
+  readOnly: true
+volumes:
+- name: credvolume
+  secret:
+  secretName: db-secrets 
+```
+* key value pairs will be put in the volume mount path as /etc/creds/db-secrets/username and /etc/creds/db-secrets//password 
+
+### Lecture 43 - Demo: Credentials using Volumes
+
+* we use CourseRepo/deployment/helloworld-secrets.yml in minikube for deployment
+```
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secrets
+type: Opaque
+data:
+  username: cm9vdA==
+  password: cGFzc3dvcmQ=
+```
+* we also deploy a secrets withg volumes deployment config file 'helloworld-secrets-volumes.yml'
+```
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: helloworld-deployment
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: helloworld
+    spec:
+      containers:
+      - name: k8s-demo
+        image: wardviaene/k8s-demo
+        ports:
+        - name: nodejs-port
+          containerPort: 3000
+        volumeMounts:
+        - name: cred-volume
+          mountPath: /etc/creds
+          readOnly: true
+      volumes:
+      - name: cred-volume
+        secret: 
+          secretName: db-secrets
+```
+* we describe a running pod. it has 2 volumes one for our secrets and one for k8s cluster secrets 
+* we launch a shell in one of pods `kubectl exec  helloworld-deployment-6d4c6b79d9-8kl5j -it -- /bin/bash` if we look for username and passowrd in volume we see their values ` cat /etc/creds/username`
+* we can look in all mounting poionts with `mount` and ls to see the dat ainside
+* we exit shell with `exit`
+
+### Lecture 44 - Demo: Running Wordpress on Kubernetes
+
+* data in this pod wont be persistent
+* the first yaml config we apply in cluster is is wordpress/wordpress-secrets.yml that sets the secret (db password)
+* then we apply the deployment config wordpress/wordpress-single-deployment-no-volumes.yml
+	* it uses a wordpress image
+	* we provide needed env variables. db passowrd is get from secrets, the others are set manualy
+	* pod contains db and wordpress
+* the app cannot scale vertically
+* we set a service described in wordpress-service.yml to access the pod (nodeport)
+* we get the url ` minikube service wordpress-service --url` and visit it.
+* our app is functional but data are non-persistent
+
+### Lecture 45 - WebUI
+
+* Kubernetes comes with a WebUI we can use instead of kubectl commands
+* we can use it to:
+	* get an overview of running apps in cluster
+	* create and modify k8s resources and workloads (like kubectl delete and create)
+	* get info on state of resources (like kubectl describe)
+* we can access WebUI in https://<k8s master>/ui
+* if it is not enabled in our deploy type we can install it manually with `kubectl create -f https://raw.githubusercontent.com/kubernetes/dashboard/master/src/deploy/recommended/kubernetes-dashboard.yaml`
+* if we use minikube we can access it with `minikube dashboard` to see the urrl `minikube dashboard --url`
+
+### Lecture 46 - Demo: WebUI in Kops
+
+* in CourseRepo/dashboard folder it has a readme and sample-user.yml
+* readme has instructions how to start dashboard in kops
+* in vagrant vm we ssh
+* first we need to create a cluster with kops
+* we follow the README instructions
+```
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/master/src/deploy/recommended/kubernetes-dashboard.yaml
+```
+* we apply the sample-user.yaml to create a serviceAccount `kubectl create -f sample-user.yaml`
+```
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admin-user
+```
+* we give him cluster admin role
+* we get the login token `kubectl -n kube-system get secret | grep admin-user`
+* we describe the decret to see the token `kubectl -n kube-system describe secret admin-user-token-4z8hl`
+* we use this token to login to the cluster without using the certificates
+* cerificates is the standard way of kops to accesst he cluster
+* our certifocates are stored in ~/.kube/config
+* we also need a password. we see it in `kubectl config view`
+* we will use it to llogin to the api server 'https://api.k8s.agileng.io'
+* we use 'admin' as user and the password we just saw
+* being logged in we see all the available paths
+* to access the ui we write 'https://api.k8s.agileng.io/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/#!/login'
+* we select token and cp the token we saw earlier
+* we are in the dashboard at last of our AWS kubernetes cluster
+
+
+### Lecture 47 - Demo:WebUI
+
+* in WebUI we can see all sorts of info for the cluster
+* we can create a deployment using the UI
+* we kreate a deployment helloworld.yml and see the pods in UI
+
+## Section 3 - Advanced Topics
+
+### Lecture 48 - Service Discovery
+
+* 
