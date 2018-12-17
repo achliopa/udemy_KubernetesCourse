@@ -1093,3 +1093,108 @@ env:
 ### Lecture 57 - Demo: Volumes
 
 * we work on AWS cluster. delete previous one create new one
+* we need to setup a volume in AWS. we use thje AWS CLI `aws ec2 create-volume --size 1 --region eu-central-1 --availability-zone eu-central-1a --volume-type gp2 --tag-specifications 'ResourceType=volume, Tags=[{Key=KubernetesCluster, Value=k8s.agileng.io}]'`
+* volume must be in same zone as cluster
+* we use a yaml deployment file for a deployment of the app with volumes helloworld-with-volume.yaml
+* the volume must have the same domain as value as the cluster
+* we need to set the AWS EBS volumeId
+```
+ volumeMounts:
+        - mountPath: /myvol
+          name: myvolume
+      volumes:
+      - name: myvolume
+        awsElasticBlockStore:
+          volumeID: # insert AWS EBS volumeID here                                                                                                                
+```
+* to delete a volume from AWS `aws ec2 delete-volume --volume-id=vol-0cf38a917538ce282 --region=eu-central-1
+`
+* we deploy the file on cluster. volume is attached AWSElasticBlockStore (a Persistent Disk resource in AWS)
+* i execute bash in pod `kubectl exec helloworld-deployment-7d668994d7-hnrwr -it -- bash` and visit moutnpoint `ls -ahl /myvol/` i write sthing and  stop the node. when it restarts the file is there
+* to stop a node `kubectl drain ip-172-20-54-9.eu-central-1.compute.internal --force`
+* we open a cell on new pod and file is persistent
+
+### Lecture 58 - Volumes Autoprovisioning
+
+* kubernetes plugins can provision storage for us
+* The AWS plugin can provision storage by creating volumes before attaching them to a node
+* this is done with StorageClas object
+* the yaml file for the auto provisioned volumes is 
+```
+kind: StorageClass
+apiVersion: storage.k8s.io/v1beta1
+metadata:
+	name: standard
+provisioner: kubernetes.io/aws-ebs
+parameters:
+	type: gp2
+	zone: eu-central-1
+```
+* this allows to create volumes with aws-ebs-provisioner
+* k8s will provision volumes of type gp2 for us
+* thenwe can create avolume claim and specify the size
+```
+kind: PersistentVOlumeClaim
+apiVersion: v1
+metadata:
+	name: myclaim
+	annotations:
+		volume.beta.kuberentes.io/storage-class: "standard"
+spec:
+	accessModes:
+	- ReadWriteOnce
+	resources:
+		requests:
+			storage: 1Gi
+```
+* then we can launch apod using the volume claim
+```
+...
+volumes:
+	-name: mypd
+	 persistentVolumeClaim:
+	 	claimName: myclaim
+```
+
+### Lecture 59 - Demo: Wordpress with Volumes
+
+* we create a cluster in AWS
+* we go to CourseRepo/wordpress-volume
+* thereis a stroageclass config yaml storage.yml . we fix the zone to match the cluster
+* pv-claim.yml configs the claim we set it to 1G
+* wordpress-db.yml sets the deployment as repl controller
+* volumes are partitions of disk so they come with a lost+found folder (we ingore it in mount)
+* we use a nodeport servioce wordpress-db-service.yml
+* we also config a Secrets object with a some keyvalue pairs
+* wordpress-web.yml cas the deployment config for wordpress. it uses the secrets as env vars
+* in wordpress we can upload pics. we use volumemount on the path that wp uses for uploads
+* we use efs for this storage in AWS an nfs file system
+* nfs is not good for DB . we use block storage for that
+* we need to create a new efs in AWS first
+* wordpress-web-service puts an LB infront of the pods
+* we use aws to create efs `aws efs create-file-system --creation-token 2 --region=eu-central-1` token must be unique
+* then we need to create an efs mount target using the efs fsid. we also need the subnet id of th ecluster . we get it with `aws ecs decribe-instances` as well as security groups
+* the command is `aws efs create-mount-target --file-system-id=fs-18912941 --subnet-id=subnet-00edd71d6c0e510fe --security-groups=sg-05592d74d0de1a8a2 --region=eu-central-1`
+* we use the filesystem-id in wordpress-web.yml and set correct region
+* we create storage => then the pvclaim => then the secrets => thenb the db => then the db-service
+* we check pvs status `kubectl get pvc` the volume is bound
+* we describe the pod and it ihas volume mounted on EBS 
+* we create wordpress web. it uses efs that takes time to create
+* we create the wordpress service (LB)
+* to use proper DNS we go to route53, create a new record se tit as alias and point it to new ELB
+* visit wordpress and do the installation
+* we have 2 pods running for wordpress ans one for db. db data are saved in a volume
+* we also have efs for media. if i try to save data i see an error. dir is not writeable. the wordpress image was not built to workj with efs volumes. we can make our own custom image or add a cmd in the deployment config
+* we use `kubectl edit deploy/wordpress-deployment` and add in spec containers
+```
+      - command:
+        - bash
+        - -c
+        - chown www-data:www-data /var/www/html/wp-content/uploads && docker-entrypoint.sh apache2-foreground
+
+```
+* i remove the pods and data is there
+
+### Lecture 60 - Pod Presets
+
+* Pod Presets can inject info into pods at runtime
