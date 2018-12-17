@@ -948,4 +948,148 @@ mysql> \q
 
 ### Lecture 50 - ConfigMap
 
-* 
+* ConfigMap object is used for config params that are not secret
+* the input is like Secrets key-value pairs
+* ConfigMap key-value pairs can be read by the ap as
+	* Environment variables
+	* Container commandline arguments in the Pod config
+	* through volumes
+* ConfigMap can contain full config files (standard files not k8s coonfig YAML)
+	* a webserver config file
+	* the file can be mounted with volumes where the application expects the config file
+	* in that way we can inject config settings in the contianers without moding the container
+* a sample workflow... we put the stdin in app.properties file (till we write EOF) and then add the file to configMap
+```
+cat <<EOF > app.properties
+driver=jdbc
+database=postgres
+lookandfeel=1
+otherparams=xyz
+param.with.hierarchy=xyz
+EOF
+kubectl create configmap app-config --from-file=app.properties
+```
+* To Use a ConfigMap we can create a pod that exposes the Configmap using a volume
+```
+...
+volumeMounts:
+- name: config-volume
+  mountPath: /etc/config
+volumes:
+- name: config-volume
+  configMap:
+  name: app-config
+```
+* config values in volume configMap are a ccessible as paths: param.with.hierarchy => /etc/config/param/with/hierarchy
+* also we can create a Pod that exposes ConfigMap as environment vars
+```
+...
+env:
+ - name: DRIVER
+   valueFrom:
+   	configMapKeyRef:
+   	 name: app-config
+   	 key: driver
+ - name: DATABASE
+ ....
+```
+
+### Lecture 51 - Demo: ConfigMap
+
+* in CourseRep we have a folder configmap. in there we have an nginx conf file named reverseproxy.conf
+* we make a configmap out of it in minikube with `kubectl create configmap nginx-config --from-file=reverseproxy.conf` we find it as `kubectl get configmap` and we can see its configuration as YAML file (SWEETTT!!!) with `kubectl get configmap <NAME> -o yaml`
+* our pod config is in nginx.yml. it uses  the configmap as volume
+* the mount path is where nginx expects its configuration (/etc/nginx/conf.d). not a random path
+* we apply it and its service as well (nginx-service.yml). grab its url and visit it
+* -vvvv in curl adds verbosity `curl http:/100:31007 -vvvv`
+* `kubectl exec -i -t helloworld-nginx -c nginx -- bash` to login the container shell. we view the nginx process
+
+### Lecture 52 - Ingress Controller
+
+* Ingress is a solution in Kubernetes >v1.1 that allows inbound connections to the Cluster
+* It is an alternative to Loadbalancer and nodePorts (good for cloud providers without load balancer)
+* Ingress allows easily expose services that need to be accessed from outside
+* With ingress we can run our own ingress controller (a loadbalancer) within the K8s cluster
+* There are default ingress controllers but we can write our own
+* When we hit the cluster from outside
+	* Ingress Controller Serivce listens to port 80 and 443
+	* It is attached to a Pod with an ingress controller container (typically nginx ingress controller)
+	* It directs traffic to the app containers in their pods (through their service)
+	* trffic routing is done based on rules we add to the ingress controller (e.g host1.example.com -> pod1)
+* We create the ingress rules using the Ingress object
+* for routing we can use path or hostname or both
+
+### Lecture 53 - Demo: Ingress Controller
+
+* in CourseRepo we visit folder ingress/
+* we see an example ingress controller config yaml 'nginx-ingress-controller.yml'
+* it is a default ingress controller from nginx. it is a replication controller (it restarts). made by google
+* it has probes. it works in port 80 and 443
+* default backend service is where traffic is routed when there is no match
+* rules are in ingress.yml that specs the ingress object
+* we apply ingress.yml (Ingress obj), nginx-ingress-controller.yml (ingress controller), echoservice.yml (default service when there is no match), helloworld-v1.yml (pod app 1), helloworld-v2.yml (pod app 2)
+* with `minikube ip`we get cluster ip
+* we hardcode host in curl `curl 192.168.99.100 -H 'Host: helloworld-v1.example.com'`
+* routing works OK
+
+### Lecture 54 - External DNS
+
+* on public cloud providers we can use the ingress controller to reduce the cost of our loadbalancers
+* we can use 1 LoadBalancer that captures all external traffic and send it to the ingress controller (vs using many LBs)
+* ingress controller can be configured to route the different traffic to all our apps on cluster based on HTTP rules (host and prefix)
+* This works only for HTTP(s) based apps. if we use othe rprotocol we have to use more LBs
+* one great tool to enable the ingres approach is External DNS
+* this tool will automatically create the DNS records in our external  DNS server (like route53)
+* for every hostname we use in ingress it will create a new record to send traffic to uour loadbalancer
+* Major DNS providers are supported: Google CloudDNS, Route53, AzureDNS, CloudFlare, DigitalOcean etc
+* other setups are posible without ingress controllers (e.g directly on hostport-nodeport).still WorkInProgress
+* Ingress example with Route53 and AWS LB.
+	* ingress rules are added to the Ingress Serivce object
+	* rules are red by nginx-ingress-controller (in the attached pod)
+	* external dns container in anohter in-cluster pod reads the rules and adds dns records for the hostnames in the external DNS providers records (out of cluster)
+	* Internet client goes to Eternal DNS provider record and gets ip
+	* client with ip hits the external loadbalancer
+	* loadbalancer sents to ingress (and ingress controller)
+	* ingress controller routes to pods based on rules
+
+### Lecture 55 - Demo: External DNS
+
+* in CourseRepo in folder external-dns we have a README
+* it contains the commands needed in our cluster to run the demo 
+* we start vagrant and create a cluster on AWS with kops
+* before we use external dns we should add a policy using the ready made script `vim ./put-node-policy.sh`
+* this script adds permmissions to the nodes and allows any pod to use these priviledges
+* adding priviledeg to every pod and everynode is not recommended especially as AWS IAM user has full access admin role
+* we update NODE_ROLE giving our AWS IAM role name and region
+* we apply it running the script in master 
+* we apply all configs in ingress folder `kubectl apply -f ../ingress/`
+* apply allows to do changes to YAML files and reapply
+* in 'nginx-ingress-controller.yml' we still have hostport. we remove both as both ports will be exposed using the AWS load balancer. we reapply
+* we apply service-l4.yml which creates a loadbalancer with an aws external ip to connect to the cluster
+* we apply external dns service and ingress rule
+* we mod the rules in ingress.yml to point to our domain hostnames same for external0dns and service-l4
+* we see the logs of the external-dns pod with all the record settings
+* SUCCESS
+
+### Lecture 56 - Volumes
+
+* needed for stateful apps
+* they allow us to store data outside of the container
+* stateless apps dont keep local state. they use an external service (e.g Database, Caching service etc)
+* we can run these services inside the cluster using persistent Volumes to store their data
+* Volumes can be attached using different volume plugins
+* a container can have a local volume (in-node storage) that can be used by another pod in the node
+* but volumes can exist outside the node
+	* AWS Cloud: EBS Storage
+	* Google Cloud: Google Disk
+	* MS Cloud: Azure Disk
+	* NW Storage: NFS, Cephfs
+* using volumes we can deploy apps with state on cluster
+* these apps RW to files on local filesystem
+* volumes out of the nod emake sense for cloud apps. node can stop running and rescheduled on another node. the new node will see the cloud volume if it is spawned in the same zone
+* to use a volume we need to create one first (YAML config) or by command `aws ec2 create-volume size 10 --region us-east-1 --availability-zone us-east-1a --volume-type gp2`
+* next we need a pod with a volume definition (volumeMounts)
+
+### Lecture 57 - Demo: Volumes
+
+* we work on AWS cluster. delete previous one create new one
