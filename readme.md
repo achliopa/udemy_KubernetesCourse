@@ -1198,3 +1198,80 @@ volumes:
 ### Lecture 60 - Pod Presets
 
 * Pod Presets can inject info into pods at runtime
+* they are used to inject kubernetes resources (e.g Secrets, ConfigMaps, Volumes, Env vars)
+* if we have multiple applications to deploy ans all need a specific credential
+	* we can edit each deployments condif adding the credential
+	* we can use presetes to create 1 Preset object. this object will inject an env variable or config file to all matching pods
+when injecting enviroment vars and volumemounts. the pod preset will apply the changes to all containers within the pod
+* preset uses a selector to be applied
+* we can use >1 pod presets. in case of conflict they wont be applied
+* PodPresets can match >0 pods. it is possible that a match will happen in future when a pod is launched
+
+### Lecture 61 - Demo: Presets
+
+* we lauch the aws cluster from vagrant vm
+* we go to kubernetes-course/pod-presets
+* in README it says that we need to edit the cluster adding a spec so as to enable PodPresets
+```
+spec:
+  kubeAPIServer:
+    enableAdmissionPlugins:
+    - Initializers
+    - NamespaceLifecycle
+    - LimitRanger
+    - ServiceAccount
+    - PersistentVolumeLabel
+    - DefaultStorageClass
+    - DefaultTolerationSeconds
+    - MutatingAdmissionWebhook
+    - ValidatingAdmissionWebhook
+    - NodeRestriction
+    - ResourceQuota
+    - PodPreset
+    runtimeConfig:
+      settings.k8s.io/v1alpha1: "true"
+
+```
+* we edit the cluster adding the spec in the bottom `kops edit cluster k8s.agileng.io --state=s3://kops-state-4213432` enabling a set of settings for presets
+* we update the cluster
+* PodPresets config YAML is in pod-presets.yaml
+```
+apiVersion: settings.k8s.io/v1alpha1   # you might have to change this after PodPresets become stable 
+kind: PodPreset
+metadata:
+  name: share-credential
+spec:
+  selector:
+    matchLabels:
+      app: myapp
+  env:
+    - name: MY_SECRET
+      value: "123456"
+  volumeMounts:
+    - mountPath: /share
+      name: share-volume
+  volumes:
+    - name: share-volume
+      emptyDir: {}
+```
+* in deployment YAML there is no spec for presets. the prams are passed based on app name (selector)
+* we apply presets and see them with `kubectl get podpresets`
+* we apply the deployments and see the params of presets in pods
+
+### Lecture 62 - StatefulSets
+
+* stateful distributed apps on a k8s cluster
+* it started as PetSets in v1.3 renamed at StatefulSets. stable sinc v1.9
+* it is introduced for stateful apps to ensure a stable pod hostname (instead of podname randomizing)
+* podname will have a sticky identity kept in reschedule
+* StatefulSets allow stateful apps stable storage with volumesbased on the ordinal number (podname-x)
+* deleting or scaling dow a StatefulSet wont delete the volumes associated with the set
+* StatefulSets allow the app to use DNS to find peers
+* ElasticSearch and Cassandra clusters use DNS to find cluster members
+* a dynamic name cannot be used in config files
+* StatefulSet allows ordering startup and teardown of app
+	* SCALING UP 0 -> n scaling down n -> 0 
+
+### Lecture 63 - Demo: StatefulSets
+
+* 
