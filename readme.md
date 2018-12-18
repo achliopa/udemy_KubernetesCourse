@@ -1274,4 +1274,125 @@ spec:
 
 ### Lecture 63 - Demo: StatefulSets
 
-* 
+* we use Cassandra (scalable db) for the demo.
+* we start our aws cluster from vagrant master
+* in kubernetes-course/statefulset thre is a cassandra.yml
+* cassandra is a scalalbe db so the nodes need to find each other by hostname
+* the YAML file config the StatefulSet is like a Deployment object
+* cassandra needs small not micro nodes to run. it has resource requirements * it uses IPC lock and when stopping it drains the node
+* seeds are retrieved by pod 0 by hostname
+* it defines a StorageClass and a Service
+* we deploy and with pods running we execute `kubectl exec -it cassandra-0 -- nodetool status` we see noide status.
+* if we login the pods shell we can ping other pods by name `ping cassandra-1.cassandra`
+
+### Lecture 64 - Daemon Sets
+
+* Daemon Sets ensure that every single node in teh Kubernetes cluster runs the same pod resource
+* it is useful if we want to ensure that a certain pod is running on every single k8s node
+* when we add a node to the cluster a new pod with be started automatically on the node.
+* if the node is removed the pod WONT be rescheduled to another node
+* use cases:
+	* logging aggregators
+	* monitoring
+	* LBs / reverse proxies, API gateways
+* syntax of config YAML is like a RepicationSet or Deployment
+
+### Lecture 65 - Resource Usage Monitoring
+
+* Heapster enables container cluster monitoring and Performance analysis
+* it provides a monitoring platform for K8s
+* it is a prereq if we want to do pod auto-scaling in k8s
+* Heapster exports cluster metrics via REST endpoints
+* we can use different backends with heappster (InfluxDB, Google cloud monitoring, Kafka)
+* Visualizations can be shown using Grafana
+* once monitoring is enabled K8s dashboard will also show graphs
+* Heapster, InfluxDB, Grafana can be started as  pods
+* their yaml files are in [gihub](https://github.com/kubernetes-retired/heapster/tree/master/deploy/kube-config/influxdb)
+* it is DEPRECATED
+* the platform gets deployes by applying the config files or using the addon system
+* in app nodes kubelet and cadvisor gather pod metrics. in heapster node heapster pod gathers all metrics and sends them to influxdb pod. grafana pod shows them
+
+### Lecture 66 - Demo:Resource Monitoring using Metrics Server
+
+* since v1.8 Metrics Server replaced Heapster. 
+* to show the metrics we can use a 3rd party tool (Prometheus)
+* we will see now how to install Metrics Server in teh cluster
+* metrics will appear in k8s dashboard
+* in our vagrant master node (kops cluster is up and running) we go to kubernetes-course/metrics-server/
+* there are a number of YAML files. we apply them all `kubectl create -f .`
+* with metrics server running we can run `kubectl top` for  node or pod to show metrics 
+* we run a simple pod so that we gather metrics `kubectl run hello-kubernetes --image=k8s.gcr.io/echoserver:1.4 --port=8080`
+* Metrics server is required for autoscalling
+
+### Lecture 68 - Autoscaling
+
+* kubernetes has the ability to automatically scale pods based on metrics
+* k8s can automatically scale a deployment, replication controller or replicaset
+* in k8s v1.3 scaling based on CPU usage is possible out-of-the-box
+* with alpha support applcation based metrics are also available (queries/sec avg req latency). to enable it the cluster has to be started with the env var ENABLE_CUSTOM_METRICS to true
+* autoscaling will periodically query the utilization for the target pods. default is 30sec. we can change that with --horizontal-pod-autoscaler-sync-period= when launching the controller manager
+* autoscaling will use metrics server to gather its metrics and decide on sclaing
+* Example
+	* a deployment with a pod with CPU resource of 200m (200millicores = 20% of CPU core on teh node)
+	* we add autoscalling at 50% if CPU usage (100m)
+	* Horizontal pod autoscaling will increase/decrease pods to maintain target CPU utilization of 50%. 
+* a pod to use for testing autoscaling
+```
+...
+resources:
+	requests:
+		cpu: 200m
+...
+```
+* autoscaling YAML config. its is applied on a deployment
+```
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa-example-autoscaler
+spec:
+ scaleTargetRef:
+   apiVersion: extensions/v1beta1
+   kind: Deployment
+   name: hpa-example
+ minReplicas: 1
+ maxReplicas: 10
+ targetCPUUtilizationPercentage: 50
+```
+
+### Lecture 69 - Demo: Autoscaling
+
+* on our minikube cluster oh host
+* we go to COurseRepo/autoscaling/ in hpa-example.yaml a Deployment a Nodeport service and a HPA are configured
+* we apply it and see the hpa with `kubectl get hpa`
+* to test we run a load-generator busybox containet in a pod and log in to tits shell `kubectl run -i --tty load-generator --image=busybox /bin/sh`
+* we hit the hpa-example pod to generate some load `wget http://hpa-example.default.svc.cluster.local:31001
+`
+* we run it in aloop to create load `while true; do wget -q -O- http://hpa-example.default.svc.cluster.local:31001; done`
+* autoscalle sees the load and scales
+
+### Lecture 70 - Affinity/Anti-affinity
+
+* ona previous demo we saw how to use nodeSelector to make sure pods get scheduled on specific nodes
+* affinity/anti-affinity feature allows us to do more complex scheduling than the nodeSelector and also work on Pods
+	* language is more expressive
+	* we can create rules that are not hard requirements, but rather a preffered rule, meaning that the scheduler will still be able to schedule our pod, even if the rules cannot be met
+	* we can create rules that take other pod labels into account
+* k8s can do node affinity and pod affinity/antiaffinity
+* node affinity is like nodeSelector
+* pod affinity/antiaffinity allows us to create rules on how pods should be scheduled based on other running pods
+* aff/antiaff mech is relevant only in scheduling
+* Node affinity types:
+	* requiredDuringSchedulingIgnoredDuringExecution (hard req)
+	* preferredDuringSchedulingIgnoredDuringExecution (soft req)
+* it uses matchExpressions
+* preferredDuringSchedulingIgnoredDuringExecution uses weighting. higher weight , more weight given to the rule. the node with higher score gets the pod scheduled
+* in addition to custom labels we add to nodes, pre-populated labels also exist.
+	* kubernetes.io/hostname
+	* failure-domain.beta.kubernetes.io/zone
+	* beta.kubernetes.io/instance-type
+	* beta.kubernetes.io/os
+
+### Lecture 71 - Demo: Affinity / Anti-Affinity
+
+* we start our cluster on AWS from vagrant vm
