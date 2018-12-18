@@ -1396,3 +1396,41 @@ spec:
 ### Lecture 71 - Demo: Affinity / Anti-Affinity
 
 * we start our cluster on AWS from vagrant vm
+* we describe a node and see the pre-populated available labels
+* we go to kubernetes-course/affinity/ where he have a node-affinity.yaml file that adds nodeAffinity to Deployment pods
+* we create it and then describe pod. they are pending as no node has the required labels
+* we add labels `kubectl label node ip-172-20-48-241.eu-central-1.compute.internal env=dev`
+* our pods are assigned 
+( i create a better match adding a team  label. i stop a pod and its rescehduled in the preferred node of better match
+
+### Lecture 72 - Interpod Affinity and ANti-Affinity
+
+* this mechanism allows us to infuence pod scheduling based on labels of other pods running in the cluster
+* pods belong to a namespace. our affinity rules will apply to a namespace. if no namespace is speced it defaults to the pod namespace
+* the same 2 types like node affinity arew available: requiredDuringSchedulingIgnoredDuringExecution, preferedDuringSchedulingIgnoredDuringExecution
+* a good use case for pod affinity is co-located pods in same node (e.g redis and app pod)
+* another usecase is pod co-location in same availability zone
+* in pod affinity/anti-affinity rules, we need to spec a toplogy domain (topologyKey). it refers to a node label. if rule matches the pod will only be scheduled on nodes with the same  topologyKey s the current running pod (matching pod). this may lead ohn the pod being scheduled on a different node than the matched pod if ithas the same ropologyKey
+* anti-affinity is the opposite. it canbe used e.g to make sure a pod is scheduled once on a node
+* based on the matching rule. it will not scheule the pod on a node with the same topologyKey value as the matching pod node
+* rules operators:
+	* In,NotIn (does a label has one of the values)
+	* Exists, DoesNotExist (does a label exist or not)
+* affinity requires a lot of processing power
+
+### Lecture 73 - Demo: Interpod Affinity
+
+* wee are in vagrant vm with our AWS cluster running
+* in kubernetes-course/affinity we see pod-affinity.yaml. it has 2 deployment one with no rules and one with affinity rules based on the other deployment pods
+* we apply it. both go to same node `kubectl get pod -o wide`
+* we scale the replicas `kubectl scale --replicas=4 deployment/pod-affinity-2`. still all go to same node
+* we delete deployments `kubectl delete 0f pod-affinity.yaml` we see the node labels with `kubectl describe node |less`
+* we change the topologyKey to a more geenric label like zone. no pods have more scheduling flex. all nodes are in same zone
+
+### Lecture 74 - Demo: Interpod Anti-Affinity
+
+* same as before opposite logic
+
+### Lecture 75 - Taints and Tolerations
+
+* 
