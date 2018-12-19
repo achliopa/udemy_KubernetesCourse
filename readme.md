@@ -1654,3 +1654,76 @@ kubectl config set-context $CONTEXT --namespace=myspace
 	* Webhooks
 * RBAC is mostly used (uses rbac.authorization.k8s.io API group) as ABAC needs manual config
 * RBAC allows dynamic permission config with the api
+
+### Lecture 85 - Demo: Adding Users
+
+* we use minikube. we ssh into the cluster `minikube ssh`
+* we creare a new key using openssl `openssl genrsa -out sakis.pem 2048`
+* we create a new certificate request specifying loging and group `openssl req -new -key sakis.pem -out sakis-csr.pem -subj "CN=sakis/O=myteam/"`
+* we use minikube ca certificate and key to create a new cerificate signed by us `sudo  openssl x509 -req -in sakis-csr.pem -CA /var/lib/localkube/certs/ca.crt -CAkey /var/lib/localkube/certs/ca.key -CAcreateserial -out sakis.crt -days 10000`
+* in that way we create a certificate we can use to authenticate to the minikube cluster API server
+* we look in the certificate `cat sakis.crt` and `cat sakis.pem` and cp the key content to use it on host system
+* on host we vim in `vim ~/.kube/config` and change apiserver.crt and key to sakis.crt akd key. 
+* we also need to cp the content of keys in `vim ~/.minikube/sakis.key` and `vim ~/.minikube/sakis.crt` 
+* we run `kubectl config view` anb see that we are using the new files to connect
+* in corporate env  we use LDAP or activex
+
+### Lecture 86 - RBAC
+
+* after authentication authorization controls what a user can do and his access rights
+* access controls are implemented on an API level (kube-apiserver)
+* when API request comes (e.g kubectl get nodes) it will be checked to see whether w ehave access to execute the command
+* The various authrization modules are:
+	* Node: a special purpose authorization mode that authorizes API requests made by kubelets
+	* ABAC: attribute based acceess control. rights controlled by policies that combine attributes
+	* RBAC: rolebased access control. dynamic permission policies
+	* Webhook: sends authorization req to external REST APi. good if we want to use our own external server. we can parse incoming JSON and reply with access deenied or granted
+* to enable authorization mode. we need to pass --authorization-mode= to the API server at startup (e.g --authorization-mode=RBAC)
+* RBAC is enabled by default in most tools (like kops and kubeadm) not in minikube (yet)
+* if we use minikube we can pass a poara at startup `minikube start --extra-config=apiserver.Authorization.Mode=RBAC`
+* we can add RBAC resources with kubectl to grant permissions. describe them in YAML then apply to cluster
+* first we define a role and then add users/group to the role
+* we can create roles limited to namespace or create roles with access aplied to all namespace. Role(namespace) ClusterRole(cluster-wide) RoleBinding (namespace) ClusterRoleBinding(cluster-wide) 
+* in Role YAMl when we leave something empty it means all e.g apiGroup= [""]
+
+### Lecture 87 - Demo:RBAC
+
+* we are in vagrant vm on the AWS cluster running
+* we go to kubernetes-course/users/ and see the READM on how to create a user
+* to create a new user we need to create cerificate. and to do that we need our clusters certificate as issue authority
+* we sync s3 key on aws with the local dir `aws s3 sync s3://kops-state-4213432/k8s.agileng.io/pki/private/ca/ ca-key`
+* we sync s3 cert on aws with the local dir `aws s3 sync s3://kops-state-4213432/k8s.agileng.io/pki/issued/ca/ ca-crt`
+* we move both key and crt into local dir renaming them `mv ca-key/*.key ca.key` `mv ca-crt/*.crt ca.crt
+` 
+* to create a new cert we need openssl
+* we create a new key `openssl genrsa -out sakis.pem 2048
+`
+* using the key we make a certificate request `openssl req -new -key sakis.pem -out sakis-csr.pem -subj "/CN=sakis/O=myteam/"`
+* we sign it using the ca.crt and ca.key `openssl x509 -req -in sakis-csr.pem -CA ca.crt -CAkey ca.key -CAcreateserial -out sakis.crt -days 10000`
+* we now have user cert and key to login to the cluster. we create a new context adding entries in the cluster config `kubectl config set-credentials sakis --client-certificate=sakis.crt --client-key=sakis.pem`
+* with user created we create a new context `kubectl config set-context sakis --cluster=k8s.agileng.io --user sakis`
+* we verify the changes with `kubectl config view` we see the user
+* if i `kubectl config get-contexts` i see the new context. we see that defualt context is current
+* if i set my new context as current `kubectl config use-context sakis`
+* now if i issue commands i get error (forbidden)
+* i switch back to default user `kubectl config use-context k8s.agileng.io`
+* the rolebindind for the new user definition is in admin-user.yml it is a ClusterRoleBinding tha binds sakis to the built-in role cluster-admin
+* we apply it. switch context and now e can execute commands
+* we switch back and delete the admin role. we apply user.yaml woith a stripped down role. switch backl context and test commands
+
+### Lecture 88 - Networking
+
+* Networking topics covered so far:
+	* Container to container comm in a pod (localhost:port)
+	* Pod-to-service comm (nodeport w/ DNS, ClusterIP)
+	* External-to-service (LoadBalancer, Ingress NodePort)
+* In k8s a pod should always be routable (Pod-to-pod comm)
+* Kubernetes assumes pods should be able to comm to other pods, regardless of which node they are running
+* Every pod has its own IP
+* Pods on different nodes need to communicate to eachother using these IP addresses.
+* the implemntation of interpod comm accross nodes is different per installation
+* On AWS: kubenet networking (kops default). every pod gets an Ip which is routable using AWS VPC (virtual private network)
+* the k8s master allocates /24 subnet to each node (254 IP addresses) 
+* the subnet is added to the VPC route table
+* there is a limit of 50 entries which means we cannot have more than 50 nodes in a single AWS cluster
+* not all cloud providers have VPC technology (GCE, Azure have it)
