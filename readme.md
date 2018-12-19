@@ -1551,4 +1551,106 @@ pgo failover mycluster --target=mycluster-xvis
 
 ### Lecture 80 - The Kubernetes Master Services
 
-* 
+* Master Node Architecture Overview:
+	* to communicate with our cluster we use kube control (kubectl) 
+	* kubectl communicates to the REST API in the master node after it passes autorization. when we send new resources and create new obkects with kubectl using the REST API these resources are saved
+	* kubernetes uses etcd (high availability cluster distributed datastore on 3 or 5 nodes) as backend where objects are stored
+	* REST API (K8s API Server) communicates with etcd and Scheduler
+	* Scheduler schedules pods not yet scheduled. it is pluggable. we can use any scheduler we want
+	* Controller Manager: exists of multiple controllers e.g node controller, replication controller
+	* REST interface communicates with kubelets in nodes
+
+### Lecture 81 - Resource Quotas
+
+* when a K8s cluster is used by multiple teams or people, resource management becomes very important
+* we need to manage the resources we give to a person or a team. we dont want a paerson or team to take all cluster resources
+* we can divide our cluster in namespaces and enable resource quotas on it
+* we do this with ResourceQuota and ObjectQuota objects
+* each container can specify 'request capacity' and 'capacity limits'
+* Request capacity is an explicit request of resources
+* Scheduler use the request capacity info to decide on where to put the pod on
+* It represents the minimum amount of rsources the pod needs
+* Resource limit is a limit imposed to the container. container cannot utilize more resources than specified
+* Example of ResourceQuota:
+	* we run a deployment with a pod with a resource of 200m (20% of single CPU core in node). a limit posed on pods could be 400m 
+	* memory quotas are defined in MiB or GiB
+* if a quota has been specified by the admin. each pod needs to specify capacity quota during creation
+* admin can spec default request values for pods that dont spec any capacity vals
+* same holds for limit quotas
+* if a resource requests more that allowed capacity. k8s server API will give an error (403 forbidden) and kubectl will show error
+* Resource limits in a namespace:
+	* requests.cpu : the sum of CPU requests of all pods cannot exceed the value
+	* requests.mem : the sum of MEM requests of all pods cannot exceed this val
+	* requests.storage : the sum of storage requests of all persistent volume claims cannot exceed this val
+	* limits.cpu : the sum of CPU limits of all pods cannot exceed this val
+	* limits.memory the sum of MEM limits of all pods cannot exceed this val
+* Admin set object limits:
+	* configmaps : total num of configmaps that can exist in a namespace
+	* persistentvolumeclaims
+	* pods
+	* replicationcontrollers
+	* resourcequotas
+	* services
+	* services.loabalancer
+	* services.nodeport
+	* secrets
+
+### Lecture 82 - Namespaces
+
+* namespaces allow us to create virtual clusters within the same physical cluster
+* namespaces logically separate your cluster
+* standard namespace is 'default'. this is where resources are launched by default
+* built-in namespace for k8s speciffic resources is 'kube-system'
+* namespaces are handy when multiple teams or projects use the cluster
+* resource name uniqueness req holds in namespaces not cluster
+* quotas and limits can be set per namespaces
+* create namespace `kubectl create namespace myspace`, get namespaces `kubectl get namespaces`
+* to set default namespace (get default context set it)
+```
+export CONTEXT=$(kubectl config view| awk '/current-context/ {print $2}')
+kubectl config set-context $CONTEXT --namespace=myspace
+```
+* to set limit on namespace we add `namespace: myspace` in ResourceQutoa metadata
+
+### Lecture 83 - Demo: Namespace Quotas
+
+* we work in minikube on host
+* we cd in CourseRepo/resourcequotas
+* in resourcequota.yml  we create a new namespace and define resource quotas in it
+* we create the objects in YAML
+* we deploy an app with no quotas (helloworld-no-quotas.yml)
+* we see the sdepolyment status in namespasce with `kubectl get deploy --namespace=myspace` no pod is launched (no quota while there is request) failed quota
+* when we deploy pods with quotas they are deployed. we hit the limit so only 2 are scheduled
+* we can see quota usage with `kubectl get quota --namespace=myspace` and see the details with `kubectl describe quota/compute-quota --namespace=myspace`
+* we can set default limits 'default.yml' then deploy without quotas. defaults are used instead of quotas
+
+### Lecture 84 - User Management
+
+* there are 2 types of users we can create
+	* normal user. used to access the cluster externally e.g with kubectl. this user is not managed using objects
+	* a Service user. managed by an object in K8s. this user is used to authenticate within the cluster. from inside a pod or from a kubelet. their credentials are managed by secrets
+* Authentication strategies for normal users
+	* Client Certificates
+	* Bearer Tokens
+	* Authentication Proxy
+	* HTTP Basic Auth
+	* OpenID
+	* Webhooks
+* Service Ysers use Service Authentication Tokens
+	* they are stored as credentials using Secrets
+	* these Secrets are mounted in pods to allow commbetween services
+* Service Users are namespace specific
+* they are created automatically by API or manually using objects
+* any Non-authed API call is treated as anonymous user
+* Norma users have following attributes
+	* Username
+	* UID
+	* Groups
+	* extrafields
+* normal user can access everything. to limit access we need to config authorization
+	* AlwaysAllow / AlwaysDeny
+	* ABAC (Attribute Based Access Control)
+	* RBAC (role based access control)
+	* Webhooks
+* RBAC is mostly used (uses rbac.authorization.k8s.io API group) as ABAC needs manual config
+* RBAC allows dynamic permission config with the api
