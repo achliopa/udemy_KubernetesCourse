@@ -1433,4 +1433,122 @@ spec:
 
 ### Lecture 75 - Taints and Tolerations
 
+* tolerations is the opposite of node affinity. they allow a node to repel a set of nodes
+* taints mark a node. tolerations are applied to pods to influence the scheduling of pods
+* one usecase for taints is to make sure that when we create pods they are not scheduled on the master node
+* in clusters of >1 nodes master gets a taint from k8s. 'node-role.kubernetes.io/master:NoSchedule'. we can only schedule on master when we have a toleration applied to a pod. by default no tolerations are applied
+* to add a taint to a node `kubectl taint nodes <nodename> key=value:NoSchedule` this makes sure that no pods will be scheduled on <nodename> node as long as they dont have a matching toleration like the following
+```
+...
+tolerations:
+- key: "key"
+  operatior: "Equal"
+  value: "value"
+  effect: "NoSchedule"
+```
+* we can use as operatiors: Equal(provide key-value) Exists(provide key only)
+* taints can also be a preference (soft req)
+	* NoSchedule: hard req
+	* PreferNoSchedule: soft req
+* taint takes effect only at scheduling unless we use: NoExecute (evict non matching pods). with NoExecute we can spec also the time till eviction (tolerationSeconds) which we put in toleration. if we dont put time toleration will match and there will be no eviction after time (tolerated)
+* use cases:
+	* taints for master nodes
+	* taint nodes dedicated to teams or users
+	* specialized Nodes (GPU) to avoid running non-spec apps
+	* taint by condition (alpha status feat). auto taint nodes with problems. allow to add tolerations to time eviction of pods
+* to enable alpha feats. add `--feature-gates` to K8s controller manager. or in kops use kops edit to add
+```
+spec:
+  kubelet:
+    featureGates:
+      TaintNodesByCondition: "true"
+```
+* taint / toleration useful keys
+	* node.kubernetes.io/not-ready : node is not ready
+	* node.kubernetes.io/unreachable : node unreachable from node controller
+	* node.kubernetes.io/out-of-disk : node runs out of disk
+	* node.kubernetes.io/memory-pressure : node has low memory
+	* node.kubernetes.io/disk-pessure : node has disk pressure
+	* node.kubernetes.io/network-unavailable : node network is unavailable
+	* node.kubernetes.io/unschedulable : node is unschedulable
+
+### Lecture 76 - Demo: Taints and Tolerations
+
+* we run in vagrant vm on AWS cluster
+* we run `kubectl get nodes <masternodename> -o yaml |less` and see the taint section where we see the rule for master added by k8s
+* in kubernetes-course/tolerations we have README with instruction on taint nodes
+* we taint a node `kubectl taint nodes ip-172-20-36-137.eu-central-1.compute.internal type=specialnode:NoSchedule`
+* we deploy a Deployment tolerations.yml with tolerations in Pods. only second deploymnt with toleration is deployed in tainted node
+
+### Lecture 77 - Custom Resource Definitions (CRDs)
+
+* CRDs allow us to extend the Kubernetes API
+* Resources are endpoints in Kubernetes API that store collections of API Objects
+* Deployment is a built-in resource that we use to deploy applicaitons
+* in YAML files we describe the object using the Deployment resource type
+* the object is created on cluster with kubectl
+* a Custom Resource is a resource we add to our cluster. its not available in every k8s cluster. it is a Extension to K8s API
+* Custom Resources are also described in YAML files
+* as an admin we can dynamically add CRDs to add extra functionality to the cluster
+* Operators use these CRDs to extend the API with their own functionality
+
+### Lecture 78 - Operators
+
+* Operators is a method of packaging, deploying and managing a K8s app (CoreOS team)
+* it puts operational knowledge to an application. it brings user closer to the experience of managed cloud services, rather than having to know the intricacis of app deployment on K8s
+* Once Operator is deployed it is managed with CDRs
+* It is a great way to deploy stateful services on K8s (hidding the complexity)
+* Any 3rd party can create Operators. (Prometheus, Vault, Rook, MySQL,PostgreSQL)
+* We can deploy PostgreSQL container.. this gives only the DB
+* If we use the operator for PostgreSQL it allows to create replicas,initiate failove, create backups, scale.more like a Cloud Service
+* operator contains management logic that an admin might want but does not want to write it from scratch
+* with postgres operator we will use custom objects from other api versions
+
+### Lecture 79 - Demo: Postgres operator
+
+* postgres operator is available in [github](https://github.com/CrunchyData/postgres-operator)
+* we are in vagrant vm with our cluster running
+* we go to kubernetes-course/postgres-operator
+* README contains all the commands
+* first we apply storage.yml to create a StorageClass setting the correct zonevim 
+* we install a ascript for GKE (works also for AWS) quickstart-for-gke.sh
+* we select storage and deploy 
+* we need to do a portforward to access the operator `kubectl port-forward  postgres-operator-5d4b49b4c8-6wtvt  18443:8443`
+* to access the cli we add it to our PATH. we use a script for this `./set-path.sh` and logout and login to vm
+* we check pgo installation with `pgo version` pgo client communicates with operator with port forwarding
+* we create a cluster with pgo and see it
+```
+pgo create cluster  mycluster
+pgo show cluster all
+```
+* what we get is
+```
+cluster : mycluster (centos7-10.4-1.8.3)
+	pod : mycluster-7dff65997f-qbd4p (Pending) on  (0/0) (primary)
+	pvc : mycluster
+	deployment : mycluster
+	service : mycluster (100.68.141.64)
+	labels : primary=true archive=false archive-timeout=60 crunchy_collect=false name=mycluster pg-cluster=mycluster 
+```
+* with kubectl get pods we see that AWS cluster has 2 pods . cluster and pgo
+* to view secrets from cluster `pgo show cluster mycluster --show-secrets=true`
+* we connect to psql db with a psql image from dockerhub `kubectl run -it --rm --image=postgres:10.4 psql -- psql -h mycluster -U postgres -W` and login to our db
+* we get nice feats with operator like the ability to scale our db with 1 command `pgo scale mycluster`
+* we see our cluster wth `pgo show cluster mycluster` 
+* we can create  a replica to another node while we maintain our node. we can apply strategies so sour cluster can survive node failure and availability zone failure
+* we can use pgo to create failover for the cluster : manualy failover
+```
+pgo failover mycluster --query
+pgo failover mycluster --target=mycluster-xvis
+
+```
+* when we query we get a replica as failover
+* the second command does the failover
+* pgtask created is a CRD we can see its definition with `kubectl get pgtasks mycluster-failover -o yaml`
+* i can see the crds `kubectl get crd`
+
+## Section 4 - Kubernetes Administration
+
+### Lecture 80 - The Kubernetes Master Services
+
 * 
