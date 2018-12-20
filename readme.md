@@ -1851,3 +1851,47 @@ data:
 	* helm list : list releases (installed charts)
 	* helm upgrade : upgrade release
 	* helm rollback : rollback to a previous release
+
+### Lecture 96 - Demo:Helm
+
+* in vagran vm we launch aws cluster
+* in kubernetes-course/helm we look at README.md for instructions
+* we follow installation instructions. download, extract and move executable to user/local/bin
+```
+wget https://storage.googleapis.com/kubernetes-helm/helm-v2.11.0-linux-amd64.tar.gz
+tar -xzvf helm-v2.11.0-linux-amd64.tar.gz
+sudo mv linux-amd64/helm /usr/local/bin/helm
+```
+* we can now use helm
+* we now have to initialize helm. we need to create the helm-rbac.yml config file to create a ServiceAccount with cluster admin role to install tiller `kudecetl create -f helm-rbac.yaml`.a service account and clusterolebinding is created
+* we do `helm init --service-account tiller` to install helm on the cluster we see the tiller installer pod wit `kubectl get pods -n kube-system`
+* we search in helm for redis `helm search redis`. we want chart stable/redis
+* we install it with `helm install stable/redis` we can name with --name myredis. we can deploy multiple charts
+* installation log gives a lot of data
+* we get the password with `kubectl get secret --namespace default myredis -o jsonpath="{.data.redis-password}" | base64 --decode`
+* we connect ro redis instance
+```
+kubectl run --namespace default myredis-client --rm --tty -i --restart='Never' \
+    --env REDIS_PASSWORD=$REDIS_PASSWORD \
+   --image docker.io/bitnami/redis:4.0.12 -- bash
+```
+* we connect to master `redis-cli -h myredis-master -a $REDIS_PASSWORD` with read/write. slave only reads
+* we `get pvc` `get pv` `get deploy` `get svc`
+* to delete chart `helm delete myredis`
+* there are charts for many apps in helm
+
+### Lecture 97 - Creating your Own Helm Charts
+
+* we can create helm charts to deploy your own appa
+* its the recommended way to deploy your apps in k8s
+* packaging the app it allows us to deploy the app in 1 command,
+* helm allows for upgrades and rollbacks. helm charts are version controlled
+* to create the files necessary for a new chart we use `helm create mychart`. it creates a directory (mychart/) with some files we need (Chart.yaml, values.yaml, templates/)
+	* Chart.yaml contains metadata
+	* values.yaml contains values we want to use for our chart
+	* templates/ folder contains k8s YAML (deployment.yaml, service.yaml)
+	* we can use tempalte mechanism in Yamls
+
+### Lecture 98 - Demo: Creating your own Helm Charts
+
+* 
