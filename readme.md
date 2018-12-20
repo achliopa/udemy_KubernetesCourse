@@ -1727,3 +1727,97 @@ kubectl config set-context $CONTEXT --namespace=myspace
 * the subnet is added to the VPC route table
 * there is a limit of 50 entries which means we cannot have more than 50 nodes in a single AWS cluster
 * not all cloud providers have VPC technology (GCE, Azure have it)
+* An available alternative is Container Network Interface (CNI) a SW that provides libs/plugins for network interfaces for containers. Popular solutions are Calico, Weave (standalone or w/ CNI)
+* An other solution is using an Overlay Network: Flannel is an easy and popular way
+* Flannel acts as a network gateway between nodes. it runs in the node as a service. in the node services have their IPs (virtual network) like 10.3.1.X (node1 vlan) and 10.3.2.X (node2 vlan) nodes have their own IPs in the cluster network (managed by cloud provider) like 192.168.0.2 and 192.168.0.3. packets have the nodes IPs to travel in the host network. but flannel injects a UDP payload encaptulating the node vlan ip addresses. so that pods can comm accross nodes. iptables are stored in etcd.
+
+### Lecture 89 - Node Maintenance
+
+* Node Controller is responsible for managing the Node objects
+	* it assigns IP space to the nod ewhen a new node is launched
+	* it keeps the nod elist up to date with available machines
+	* the node controller monitors the health of the node: if a node gets unhealthy it gets deleted. pods running on an unhealthy node get rescheduled
+* When adding a new node , kubelet will try to register itself
+* it is called self-registration and is a default behaviour
+* it allows to easily add more nodes to the cluster without making API changes
+* the new node object is automatically created with: metadata (name,IP,hostname) and labels (cloud region, availability, instance)
+* A node has a node condition (e.g Ready, OutOfDisk)
+* To decommission a node (gracefully) we drain it (remove pods) before shuting down `kubectl drain <nodename> --grace-period=600`. If the nod eruns pods not managed by a controller `kubectl drain <nodename> --force`
+
+### Lecture 90 - Demo: Node Maintenance
+
+* we ll see how to drain a node in minikube
+* we create a deployment CourseRepo/deployment/helloworld.yml
+* all pods are in the single node. we drain it `kubectl drain minikube` we need to use --force
+
+### Lecture 91 - High Availability
+
+* if we want to run the cluster in production , we will want to have all our master services in a High Availability (HA) Setup
+	* Clustering etcd: al least run 3 etcd nodes
+	* Replicated API servers with a LoadBalancer
+	* Running multiple instances of the scheduler  and the controllers (one leader , others in standby)
+* etcd: 1 node (No HA) 3nodes (HA) 5nodes (Big cluster HA)
+* With HA we have at least 2 master nodes.
+	* load balancer directs traffic from client (kubectl) and nodes to the 2 masters
+	* serices running on both: authorization, APIs (REST, scheduling actuator), kubectl and monit
+	* services on standby: scheduler and controller manager
+* kops hccan do the heavy lifting for production cluster on AWS. on other provider s we use other kube deployment tools
+* kubeadm can set up a cluster for us [HA with no tooling](https://kubernetes.io/docs/setup/independent/high-availability/)
+
+### Lecture 92 - Demo: High Availability
+
+* in vagrant vm we create a new cluster addind master zones `kops create cluster --name=k8s.agileng.io --state=s3://kops-state-4213432 --zones=eu-central-1a, eu-central-1b,eu-central-1c --node-count=2 --node-size=t2.micro --master-size=t2.micro --dns-zone=k8s.agileng.io --master-zones=eu-central-1a,eu-central-1b,eu-central-1c`
+* we can spec multiple zones for nodes. 
+* we spec multiple zones for master. 3 zones means 3 masters one in each zone
+* we create the cluster and see the configuration `kops edit ig --name=k8s.agileng.io nodes --state=s3://kops-state-4213432` ig stands for instance groups
+* we see the instancegroup config. if we want to move to 1zone we can remove 2 extra zones
+* to see the master node we `kops edit ig --name=k8s.agileng.io master-eu-central-1a --state=s3://kops-state-4213432`
+* we do the same inspecion to outher masters on other zones. if a zone fails we still have a master to run the cluster
+
+### Lecture 93 - TLS on ELB using Annotations
+
+* we can setup cloud specific feats (like TLS termination to use https) on AWS LoadBalancers that we create in K8s using services of type LoadBalancer
+* we can do this using annotations: in the Service YAAML descript
+* The possible annothations for the AWS ELB:
+	* service.beta.kubernetes.io/aws-load-balancer-access-log-enit-interval, service.beta.kubernetes.io/aws-load-balancer-access-log-enabled, service.beta.kubernetes.io/aws-load-balancer-access-log-s3-bucket-name, service.beta.kubernetes.io/aws-load-balancer-access-log-s3-bucket-prefix are all used to enable access logs on the load balancer. we need also permissions
+	* service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags (add tags)
+	* service.beta.kubernetes.io/aws-load-balancer-backend-protocol (spec the backend protocol to use, the protocol that pod uses e.g http or https). https is of not use as we are in the cluster
+	* service.beta.kubernetes.io/aws-load-balancer-ssl-cert (Certificate ARN)
+	* service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled (connection draining)
+	* service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout : client timeout when backend node stops during scaling
+	* service.beta.kubernetes.io/aws-load-balancer-connection-idle0timeout
+	* service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled CrossAZ balancing
+	* service.beta.kubernetes.io/aws-load-balancer-extra-security-groups
+	* service.beta.kubernetes.io/aws-load-balancer-internal set elb to internal lb mode (no public ip)
+	* service.beta.kubernetes.io/aws-load-balancer-proxy-protocol Enable proxy protocol
+	* service.beta.kubernetes.io/aws-load-balancer-ssl-ports : what listeners to enable HTTPS on (default is to all usually set to 443)
+
+### Lecture 94 - Demo: TLS on ELB
+
+* to terminate TLS on ELB we need to create an SSL certificate
+* we go to AWS certificate manager. to create a cert
+* check region => provision certificate => request a public cert => use our domain name  adding a subdomain 'helloworld.k8s.agileng.io' => next => dns validation => review => confirm and request => we need to add the CNAME record to our den provider as our domain is on route 53 we click 'Create record in Route53' => continue
+* it is pending validation. we go to Route53 =>  hosted zone we see it added
+* after some time it is issued. in its details we see and cp the ARN to use in YAML file
+* we create a singlem master cluster
+* in kubernetes-course/elb-tls we have 2 yaml files. 1 for deployment (3 pods) and one for the Service (loadbalancer) there we use annotations
+```
+service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:region:accountid:certificate/..." #replace this value
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "60"
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "environment=dev,app=helloworld
+```
+* we add the arn, backedn prot is http
+* we use 2 ports in load balancer 80 and 443
+* we apply it
+* we get external ip with `kubectl get services -o wide` we add the hostname to route53 add a record and use the alias of elb hostname
+* in EC2 => LoadBalancers => details i see 2 instances of ELB (2 nodes) listning to 2 ports
+* both http and https works
+
+## Section 5 - Packaging and Deploying on Kubernetes
+
+### Lecture 95 - Introduction to Helm
+
+* 
