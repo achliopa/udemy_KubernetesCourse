@@ -1820,4 +1820,34 @@ service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:region:accou
 
 ### Lecture 95 - Introduction to Helm
 
-* 
+* Helm: the best way to find, share and use SW built for Kubernetes
+* a package manager for K8s. it helps manage K8s apps
+* HELM is maintained by CNCF (Cloud Native Computing Foundation) like Kubernetes. Also by Google, MS and other
+* to start using helm we need to download helm client
+* we need to run 'helm init' to initialize helm on the K8s cluster
+	* it will install Tiller
+	* if we have RBAC (recent clusters have it by default) we need to add ServiceAccount and RBAC rules so that Helm can install Tiller
+* After this helm is ready and we can start installing charts
+* Charts is a packaging format used by Helm. it is a collection of files that describe a set of Kubernetes resources (like YAML files)
+* A single chart can deploy an app. a piece of SW or a DB
+* It can have dependencies
+* We can write our own chart to deploy our app on Kubernetes using Helm
+* Charts use templates that are developed by a package maintainer. they generate YAML files that K8s can understand. Templates are like dynamic YAML files, with logic and vars
+```
+apiversion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-configmap
+data:
+  myvalue: "Hello World"
+  drink: {{ .Values.favoriteDrink }}
+```
+* in this template example. the 2 vars used can be overriden by the user when running helm install
+* Common Helm Commands
+	* helm init : install tiller on cluster
+	* helm reset : Remove tiller from cluster
+	* helm install : Install a helm chart
+	* helm search : search for a chart
+	* helm list : list releases (installed charts)
+	* helm upgrade : upgrade release
+	* helm rollback : rollback to a previous release
