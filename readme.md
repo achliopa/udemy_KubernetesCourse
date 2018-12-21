@@ -1863,7 +1863,7 @@ tar -xzvf helm-v2.11.0-linux-amd64.tar.gz
 sudo mv linux-amd64/helm /usr/local/bin/helm
 ```
 * we can now use helm
-* we now have to initialize helm. we need to create the helm-rbac.yml config file to create a ServiceAccount with cluster admin role to install tiller `kudecetl create -f helm-rbac.yaml`.a service account and clusterolebinding is created
+* we now have to initialize helm. we need to create the helm-rbac.yml config file to create a ServiceAccount with cluster admin role to install tiller `kubectl create -f helm-rbac.yaml`.a service account and clusterolebinding is created
 * we do `helm init --service-account tiller` to install helm on the cluster we see the tiller installer pod wit `kubectl get pods -n kube-system`
 * we search in helm for redis `helm search redis`. we want chart stable/redis
 * we install it with `helm install stable/redis` we can name with --name myredis. we can deploy multiple charts
@@ -1882,7 +1882,7 @@ kubectl run --namespace default myredis-client --rm --tty -i --restart='Never' \
 
 ### Lecture 97 - Creating your Own Helm Charts
 
-* we can create helm charts to deploy your own appa
+* we can create helm charts to deploy your own app
 * its the recommended way to deploy your apps in k8s
 * packaging the app it allows us to deploy the app in 1 command,
 * helm allows for upgrades and rollbacks. helm charts are version controlled
@@ -1893,5 +1893,137 @@ kubectl run --namespace default myredis-client --rm --tty -i --restart='Never' \
 	* we can use tempalte mechanism in Yamls
 
 ### Lecture 98 - Demo: Creating your own Helm Charts
+
+* in the same helm dir of course repo we run `helm create mychart`
+* files are generated. we vim in values.yaml. we look in template / folder files
+* deployment.yaml contains a lot of templating. _helpers.tpl contains the tempaltes. we can overide the values in values.yaml. Value. in tempaltes refers to the values.yaml
+* we install mychart/ (from parent dir). we get unique name. a pod and deployment is created. installation log gives instructions on how to access app url
+* we do port forwarding `kubectl port-forward $POD_NAME 8080:80` to run in bg ctr+z. to see whats running on bg `bg`
+* we visit `http://127.0.0.1:8080` and see the nginx message
+* we stop prot forwarding. now we canot access the url. 
+* we list the chart `helm  list` and remove it `helm delete <chart name>`
+* we can use the template to create our own complex charts
+
+### Lecture 99 - Demo: nodejs app Helm chart
+
+* we go to kubernetes-course/helm/demo-chart
+* it started from helm create but adapted it (mostly in values.yaml)
+it uses tutors docker image. the sc is in node-demo-app. the app needs myswl
+* he uses maria.db
+* in templates/deployment.yaml env vars are set to connect to MYSQL
+* in VIM we search with /<term> . we split screen with :split <new file to open>
+* in README.md are the commands to install the chart 
+```
+helm dependency update # download dependencies in charts/ folder
+helm install . # being  in the chart folder
+```
+* we see the Secrets installed `kubectl get secret cold-marmot-mariadb -o yaml`
+* we `echo '<passwrod>' base64 --decode` to see pswd
+* we `kubectl logs` in pods to see logs
+* we `kubectl get swc -o wide` to see the url to hit the app. we curl to it
+* the counter increases because of healthchecks (probes)
+* we vim to values.yaml
+* we upgrade with `helm upgrade --set image.tag=v0.0.2,mariadb.db.password=$DB_APP_PASS RELEASE`
+* we need a fixed password for it to work for mariadb (a bug of mariadb chart). if we use random password it will create a new password on upgrade. so when we do upgrade we spec the password or don not use random password `helm upgrade --set image.tag=v0.0.2,mariadb.db.password=Yy5m5gH3V1 cold-marmot .`
+* upgrade replaces pods
+* we can rollback. we first see the revision hsitory of chart `helm history cold-marmot`
+* we rollback `helm rollback cold-marmot 1`
+* `helm <chart> --purge` deletes all 
+
+### Lecture 100 - Demo: Setting Up a Helm Repository on S3
+
+* when we installed charts in previous lecture we had our custom chart locally and installed it from folder
+* we work in vagrant vm on aws cluster
+* in kubernetes-course/helm/README.md there are info on how to setp a Helm repo
+* we use the ready script 'setup-s3-helm-repo.sh'
+	* in create a random string as S3 buckets must be unique
+	* set the region
+	* we use aws cli tool to create the bucket
+	* we install helm s3 plugin
+	* init the s3 bucket
+	* add the repo to helm
+* we check aws installation (credentials) with `aws sts get-caller-identity`
+* we run the bash script `./setup-s3-helm-repo.sh`
+* we export our AWS region `export AWS_REGION=eu-central-1`
+* we package the demo-chart local helm directory `helm package demo-chart` a tarbal is created
+* we use helm to push it to remote repo `helm s3 push ./demo-chart-0.0.1.tgz my-charts`
+* we can now search the chart `helm search demo-chart` a local version and a remote version is found
+* we install it from remote repo `helm install my-charts/demo-chart`
+
+### Lecture 101 - Demo: Building and Deploying Helm Charts with Jenkins CI
+
+* we need to deploy jenkins in our cluster. we will use helm to do it (SWEETTT)
+* in kubernetes-course/helm/jenkins/README.md we see the instructions
+* we first create the serviceaccount.yaml to give cluster admin rights to jenkins pod
+* helm install command is more involved than usual `helm install --name jenkins --set rbac.install=true,Master.RunAsUser=1000,Master.FsGroup=1000 stable/jenkins` we set rbac run it as user and choise chart
+* jenkins install output gives info on how to use it
+* we extract password `printf $(kubectl get secret --namespace default jenkins -o jsonpath="{.data.jenkins-admin-password}" | base64 --decode);echo` hvR70Mr1BI
+* we get the jenkins service URL `export SERVICE_IP=$(kubectl get svc --namespace default jenkins --template "{{ range (index .status.loadBalancer.ingress 0) }}{{ . }}{{ end }}")` as an env param
+* we echo the URL `echo https://$SERVICE_IP:8080/login`
+* we visit it from host (we add it to route53)
+* we login to jenkins and update the plugins
+* the first job we will assign to jenkins is he build job. build the helm package and push it to s3 repo
+* we need permissions for s3 bucket so jenkins can access s3. pemissions are in script put-bucket-policy.sh. it adds permissions to s3 so tha k8s node can write to s3. we  mod the zone and s3 bucket name and node role ARN of our k8s cluster
+* to get the roles `aws iam list-roles | grep k8s.agileng.io` i get master and node role. i cp node arn to bash script
+* i run the script `./put-bucket-policy.sh`
+* i log in jenkins => create new job => pipeline (demo-chart build) => ok
+* PIpeline script => script (cp from kubernetes-course/helm/jenkins/Jenkinsfile.build) if we use git as SCM we need to own the repo (fork it)
+	* use kubernetes jenkins plugin and a container with helm client with s3 plugin this will run in bg
+	* another pod with cet the project repo ftopm git and run a shell scrript. use s3 bucket. sp git repo locally make a repo in s3 for chart and use it to install. we mode bucket name and zone
+* we save and build it (build now)
+* we have the chart in the s3 repo.
+* we make a second job (new item) demo-chart deploy ([pipeline]). we cp the script from /helm/jenkins Jenkinsfile.deploy
+	* same backgroun helm client pod (with another account with permissions to ddeploy on cluster)
+	* again clone git repo localy enter repo and see if it is there if not it will add it . it will installl and upgrade
+* save and run
+* if we link git hub with jenkins every time we push to master it will trigger the pipeline
+* chart is running on 
+* we can configure the task => add build triggers (poll SCM)
+
+## Section 6 - Serverless on Kubernetes
+
+### Lecture 102 - Introduction on Serverless
+
+* Public Cloud Providers often provide Serverless capabilities in which you can 'deploy functions', rather than instances or containers
+	* Azure Functions
+	* Google Cloud Functions
+	* AWS Lambda
+* with these we dont need to manage infrastructure
+* functions are not 'always on'unlike containers and instances. this can reduse cost of serverless if the function does not execute a lot
+* In public clud serverless reduces complexity, op costs, and eng time to run code
+* developers just 'push code'
+* cold starting. (invocation time) is an issues the needs to be taken care of
+* AWS Lambda function
+```
+exports.handler = function(event, context) {
+	context.succeed("Hello, World!");
+}
+```
+* we need to setup when func is executed. In AWS we use an API Gateway, to set a URL, this URL will invoke the func when hit
+* rather than use containers to start apps in k8s we can use functions
+* monst popular projects enabling functions are:
+	* OpenFaas
+	* Kubeless
+	* Fission
+	* OpenWhisk
+* we can install and use any of them to let devs launch function on our K8s cluster
+* as admin we need to manage the underlying infra. developers they can deploy funcs on k8s fast and easy
+* new tech. evolving fast. select wisely the most mature solution
+
+### Lecture 103 - Introduction to Kubeless
+
+* Kubeless is a Kubernetes native framework [github](https://github.com/kubeless/kubeless)
+* it leverages k8s resources to provide autoscalling, API routing, monitoring etc
+* it uses CRDs (custom resource definitions) to be able to create functions
+* it has UI for developers to deploy functions
+* we can use our preferred language (Python,JS,Ruby,Golang..)
+* once we deploy our func we have to spec how it will be triggered (AWS lambda uses API Gateway through a URL)
+* what is supported:
+	* HTTP functions (executed when endpoint is triggered). we write a func with text, html to be displayed on browser
+	* sheduled function
+	* PubSub (Kafka or NATS). triggers a function when data is available in kafka/nats
+	* AWS kinesis. trigger based on data in AWS kinesis (like kafka)
+
+### Lecture 104 - Demo: Creating Functions w/ Kubeless
 
 * 
