@@ -2026,4 +2026,69 @@ exports.handler = function(event, context) {
 
 ### Lecture 104 - Demo: Creating Functions w/ Kubeless
 
-* 
+* we need the AWS cluster
+* we dowload latest release of kubeless from github
+* in vagrant box we goto kubernetes-course/kubeless and in README.md. it has instructions for getin kubeless on k8s
+* we `wget https://github.com/kubeless/kubeless/releases/download/v1.0.1/kubeless_linux-amd64.zip` and unzip it `unzip kubeless-linux-amd64.zip` and move it to local/bin `sudo mv bundles/kubeless_linux-amd64/kubeless /usr/local/bin` and remove sources `rm -r bundles/`
+* kubeless cli is working. we now need to install kubeless on the k8s cluster
+* we create a new namespace `kubectl create ns kubeless`
+* we create the yaml of the release we used from github `kubectl create -f https://github.com/kubeless/kubeless/releases/download/v1.0.1/kubeless-v1.0.1.yaml`. we get configmap,deployment. seriverole,clusterrole, binding, crds
+* we see the pods of the new namspce `kubectl get pods -n kubeless` (3 pods managing the kubeless)
+* we are ready to deploy functions serverless!!! we start with python example
+```
+kubeless function deploy hello --runtime python2.7 \
+                               --from-file python-example/example.py \
+                               --handler test.hello
+
+```
+* and nodejs
+```
+kubeless function deploy myfunction --runtime nodejs6 \
+                                --dependencies node-example/package.json \
+                                --handler test.myfunction \
+                                --from-file node-example/example.js
+```
+* we spec name, ruyntime, file with code and handler (hook to use function)
+* js ffolder has a package.json for dependencies (no dep)
+* `kubeless function ls` gives a list with avail functions
+* every function has a pod generated 
+* we call the function from console `kubeless function call myfunction --data 'This is some data'`
+* we can see the logs of this pod `kubectl logs myfunction-fc4f6f9d9-tjmtf `
+* if we expose a function we can trigger it from outside the cluster. kubeless uses ingress. we create an ingress controller `kubectl create -f nginx-ingress-controller-with-elb.yml
+`
+* there are no ingress rules `kubectl get ingress`
+* we create the trigger for the function using kubeless . an http trigger setting the HTTP URL `kubeless trigger http create myfunction --function-name myfunction --hostname myfunction.k8s.agileng.io`
+* we use RouteDNS to bind the ELB endpoinmt to this subdomain
+* to see the elb endpoint `kubectl get svc -n ingress-nginx -o wide`
+* `curl myfunction.k8s.agileng.io` and IT WORKS
+* if we check `host myfunction.k8s.agileng.io` we get 2 ips 1 per availability zone
+
+### Lecture 105 - Demo: Triggering kubeless Functions with Kafka
+
+* we need to install kafka. we can install it in the cluster using kubeless if we want.
+* we do it the normal kubectl way
+* we export the RELEASE `export RELEASE=$(curl -s https://api.github.com/repos/kubeless/kafka-trigger/releases/latest | grep tag_name | cut -d '"' -f 4)`
+* we create the deployment using the RELEASE yaml from github `kubectl create -f https://github.com/kubeless/kafka-trigger/releases/download/$RELEASE/kafka-zookeeper-$RELEASE.yaml` kafka needs zookeper
+* we can sse pods from ALL namespaces with `kubectl get pods --all-namespaces`. kafka runs in kubeless namespace
+* we deploy a function
+```
+kubeless function deploy uppercase --runtime nodejs6 \
+                                --dependencies node-example/package.json \
+                                --handler test.uppercase \
+                                --from-file node-example/uppercase.js
+
+```
+* to trigger it with kafka we use `kubeless trigger kafka create test --function-selector created-by=kubeless,function=uppercase --trigger-topic uppercase`
+* kafka uses topics (a queue where we can send data and trigger the function)
+* we can trigger it by publishing some data on this topic. we dont need kubeless. any tool that can publish data to kafka can be used `kubeless topic publish --topic uppercase --data "this message will be converted to uppercase"`. we look at the uppercase pod log `kubectl logs uppercase-66d9b6b75c-fkpsw`. function logs uppercase in pod log
+* we use kubeless to send data to kafka
+
+## Section 7 - Microservices
+
+### Lecture 106 - Introduction to Istio
+
+* kubernetes makes it easy to deploy various apps. apps can be monoliths (apps that dont have anything to do with each other) or microservices, small services that make up one app
+* the microservice approach allow developers to split the app in multiple independent parts
+* manging microservices and put operational strain on eng team
+* in monoliths: client hits the load balancer which directs traffic in cluster to ingress. ingress routes traffic to one of the app pods each one with  its own resources (db). sometimes ap talk to each other
+* microservies is multiple pods communicating with each other (service mesh)
