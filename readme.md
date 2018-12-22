@@ -2138,4 +2138,96 @@ cd istio-1.0.5 # change 1.0.2 in your version
 
 ### Lecture 109 - Demo: Advanced Routing With istio
 
-* 
+* we will createa v2 hellow orld app.
+* istio-ingress will route to hello service and hello to world.world to world-2
+* we will add a new pod hellow(v2) a new deployment with same app label
+* in istio rules will we wll add rules for routing based on version. the rule will be based on hettp headers
+* this is powerful., we can test a nw service based on rules. hello(v2) comms with world-2 skiping world
+* the new deployment is in helloword-v2.yaml
+* the new rules are in helloworld-v2-routing.yaml. its a DestinatioNRule. routing is done in VirtualService based on a matching rule. 
+* we deply `kubectl apply -f <(istioctl kube-inject -f helloworld-v2.yaml)` and apply the routing rules `kubectl apply -f helloworld-v2-routiung.yaml`
+* we check services like before to get ELB url and use it with curl. hitting /hello doesnt work anymore due to new rules. we can see verbose on cuel with -v
+* we hit using the new rule (spec hopstname) `curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com/hello -H "host: hello.example.com"` and we hit v1
+* if i match the rule `curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com/hello -H "host: hello.example.com" -H "end-user: john"` we hit v2
+
+### Lecture 110 - Demo: Canary Deployments
+
+* we will apply a new rule for routing between 2 versions. not by a match rule but by a percentage of traffic. v1 will get a 90% and v2 a 10%
+* we override VirtualService using helloworld-v2-canary.yaml. we aff weigght and param to route for each destination. we apply with kubectl apply -f
+* we implement a for loop in bash to test it `for ((i=1;i<=20;i++)); do curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com/hello -H "host: hello.example.com"; done`. it works
+
+### Lecture 111 - Demo: Retries
+
+* a feat of Istio is Retries. if a pod stops working istio directs traffic to a new pod
+* v3 of helloworld app will have 2 deployments. 2 pods in 1st deployment and 1 in 2nd. the 2nd depl pod will have Pod latency of 5s
+* In pu VirtualService config we will set a Timeout of 10s and max 2 retry attemps with intertimeout 2s. if a pod fails to repply in 2s istiop will get another pod
+* our new rules are in helloworld-v3.yaml.we have 2 Deployments 1 DestinationRule and VirtualService eith rules
+* we get destination rule `kubectl get destinationrule` and describe it. we see all rules combined. allso we have 2 virtualservice
+* we hit the new v3 `for ((i=1;i<=20;i++)); do curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com/hello -H "host: hello.example.com"; done` we see always asame pod
+* we do the loop adding time `for ((i=1;i<=20;i++)); do echo "/n" | time curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com/hello -H "host: hello-v3.example.com"; done` we dont see latency pod. it just adds delay of 2s. if we remove retries. latency pod will be answering but with 5s delay
+
+### Lecture 112 - Mutual TLS
+
+* Goals of security in Istio:
+	* ecurity by default: no changes needed for app code or infrastructure
+	* Defence in depth: integrate with existing security systems to provide multiple layers of defence
+	* Zero trust networks: build security solutions on untrusted networks
+* Istio provides two types of authentication:
+	* 1) Transport authentication (service-to-service authentication) using mutual TLS
+	* 2) Origin Authentication (end-user authentication). it verifies the end user using a JWT
+* Mutual TLS in Istio:
+	* can be turned on without having to change the code of apps (sidecar deployment does the trick)
+	* It provides each service with a strong identity. attacks by impersonation by rerouting DNS records will fail, because a fake app cant prove its identity using the certificate mechanism
+	* Secures (encrypts) service-to-service and end-user-to-service communication
+	* Provides key and certificate management to manage generation, distribution and rotation
+* To test Mutual TLS we will create 3 namespaces in cluster 1,2 and legacy. legacy wont have istio.1 and 2 will
+* services will need to comm across namespaces. 1 entry service will be with istio and 1 on pod without istio
+
+### Lecture 113 - Demo: Mutual TLS
+
+* again in kubernaetes-vcourse/istio folder
+* we look at helloworld-tls.yaml. it has all . namespaces, services, gateway (same as before), DestinatioNRule. helloworld-tls-leg	sacy.yaml has the legacy deployment (no istio)
+* we apply istio deploment `kubectl apply -f <(istioctl kube-inject -f helloworld-tls.yaml)`
+* we apply legacy deployment `kubectl create -f helloworld-tls-legacy.yaml`
+* we check the services in istio-system namespace. we see out loadbalancer link.
+* we use `curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com -H "hello-tls.example.com"` and "hellott-tls.reverse.com"
+* we see another script helloworld-tls-enable.yaml . it applies a meshpolicy MTLS (Mutual TLS). when we apply it. anything that does not use tls in clusterr wont be reachable (except where we DISABLE it in the script)
+* we need toi enamble it in helloworld-tls.yaml and appl;y ISTION_MUTAL trafficPolicy. without that when mutual TLS is activated traffic from ingfress wont reach the app. legacy deployments (no istio) woth be reachable from ingress unless we deiasable tls
+* when we enable Mutual TLS istio pods can comm legacy pods . legaacy pods cannot comm istio pods
+
+### Lecture 114 - RBAC with Istio
+
+* now with Mutual TLS we have strong identities
+* based on these identities we can do Role Based Access Control
+* RBAC allows us to limit access between services and from end-user to services
+* Istio is able to verify the identity of a service by checking the identity of the x509 certificate (which comes with enabling mutual TLS). e.g service A can be contacted by B but not C
+* Identities capability in istio is built using the SPIFFE standard (Secure Production Identity Framework For Everyone)
+* RBAC in Istio
+	* Can provide service-to-service and end-user-to-service authorization
+	* supports conditions and role-binding (we can bind to ServiceAccoutns linked to pods)
+	* end-user-to-service can le us create conditions on being authenticated with JWT
+	* it has high performance. it is natively enforced on envoy (sidecar proxy)
+* RBAC is not enabled by default. we have to enable it
+* we can enable it globally or on a namespace basis. e.g
+```
+apiVersion: 'rbac.istio.io/v1alpha1'
+kind: RbacConfig
+metadata:
+  name; dfault
+spec:
+  mode: 'ON_WITH_INCLUSION'
+  inclustion:
+    namespaces: ['default']
+```
+* we can then create a ServiceRole that speciffies the rules and a ServiceRoleBinding to link a ServiceRole to a subject (e.g K8s ServiceAccount)
+* e.g ServiceRole for helloworld app (for istio-ingress)
+```
+rules:
+- services: ['hello.default.svc.cluster.local']
+  methods: ['GET','HEAD']
+```	
+
+### Lecture 115 - Demo: RBAC with Istio
+
+* we delete previous eployments
+* in kubernetes-cluster/istio
