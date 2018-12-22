@@ -2092,3 +2092,50 @@ kubeless function deploy uppercase --runtime nodejs6 \
 * manging microservices and put operational strain on eng team
 * in monoliths: client hits the load balancer which directs traffic in cluster to ingress. ingress routes traffic to one of the app pods each one with  its own resources (db). sometimes ap talk to each other
 * microservies is multiple pods communicating with each other (service mesh)
+* between services usually we have no encryption, no retries, no failover, no intelligent load balancing, no routing decisions,, no metrics/logs/trace, no access control
+* to implement all these feats manually take effort
+* one solution is to add a proxy to each microservice (sidecar deployment). instead of comming to the app (microservise) we comm to the proxy. proxy can have encryption,retries when connection fails, intelling loadbalancing
+* we can add a management interface to push changes to these sidecar proxy processes. no we can have routing decisions, metrics,logs,traces, access control
+* these addons are what make Istio. Istio uses:
+	* Envoy Proxy (the sidecar). it can be added as container in the pod of the app (microservice). envoys can comm encrypted with authentication, 
+	* Config data are pushed by central app the Istio from Pilot service. 
+	* Citadel central service provides TLS Certs
+	* central services are managed by the Control Plane API
+
+### Lecture 107 - Demo: Instio Installation
+
+* we login vagrant vm and launch the cluster
+* in kubernetes-course/istio we have what we need
+* to install istio on a cluster using cops we need to do some mods to the cluster.
+* we create a new cluster `kops create cluster --name=k8s.agileng.io --state=s3://kops-state-4213432 --zones=eu-central-1a --node-count=2 --node-size=t2.medium --master-size=t2.micro --dns-zone=k8s.agileng.io`
+* we use medium for nodes. t2.micro provides 2gb of mem while medium provides 4gb. istio needs memory on nodes
+* we look at README.md
+* we need to edit the cluster adding a buch of options to APIserver admission control `kops edit cluster k8s.agileng.io --state=s3://kops-state-4213432` and update cluster
+* we download istio
+```
+cd ~
+curl -L https://git.io/getLatestIstio | sh -
+echo 'export PATH="$PATH:/home/vagrant/istio-1.0.5/bin"' >> ~/.profile # change 1.0.2 in your version
+cd istio-1.0.5 # change 1.0.2 in your version
+```
+* `istioctl` is avialable now
+* in kubernetes-course/istio we run `kubectl apply -f ~/istio-1.0.5/install/kubernetes/helm/istio/templates/crds.yaml` to add istio CRDs
+* we have 2 scripts to install istio (with or withoiut TLS) if we use TLS then we wont be able to access existing pods in the cluster . also we need a cert. we opt no tls `kubectl apply -f ~/istio-1.0.5/install/kubernetes/istio-demo.yaml`
+* we can see the new pods of istio `kubectl get pods -n istio-system`
+
+### Lecture 108 - Demo: An Istio Enabled App
+
+* we ll use curl (client) to hit the app (multi-microservices)
+* with istio added in cluster there will be an istion ingress service and a AWS Load balancer
+* we wil need to add config to istio ingress so that it knows how to contact the app.
+* istio-ingress contacts the envoy proxy in the pods of the apps(microservices)
+* apps in pods commto eachother using the envoy proxy
+* our app will have 3 deployments (1 per app) of 3 replicas
+* helloworld.yaml has no istio parts . all will be injected by istio
+* we deploy using istioctl . command `istioctl kube-inject -f helloworld.yaml` injects isto components into deployment file. to apply in cluster w euse `kubectl apply -f <(istioctl kube-inject -f helloworld.yaml)`
+* if we want to contact our app we need to define the istio gateway (helloworld-gw.yaml). if we want to acess multiple services in istio form outside we need multiple VIrtualServices. 
+* we apply `kubectl create -f  helloworld-gw.yaml ` and check services in inamspace . we see the loadbalancer hostname . we `curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com /hello` and see the app oiutput. reply is assenmbled by all app pods
+
+### Lecture 109 - Demo: Advanced Routing With istio
+
+* 
