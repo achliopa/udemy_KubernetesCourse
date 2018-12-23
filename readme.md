@@ -2354,4 +2354,68 @@ kubectl apply -f ~/istio-1.0.5/install/kubernetes/istio-demo.yaml
 
 ### Lecture 119 - Demo: Distributed Tracing with Jaeger
 
-* 
+* in our helloworld micorserrvice app on cluster i want to trace the requests in all stages (ingress->hello, hello->world, world->world2)
+* we lauch our helloworld app `kubectl apply -f <(istioctl kube-inject -f helloworld.yaml)` and launch a gateway to the app `kubectl apply -f helloworld-gw.yaml`
+* we want to start Jaeger. jaeger is a running pod in istio system `kubectl get pods -n istio-system` as istio-tracing
+* jaeger also has a service `kubectl get svc -n istio-system`. actually 3 services . the agent, the collector and the query
+* query has a graphical UI allowing us to see the traces. i need to use kubectl portdforwarding to expose it to the outside to hit it with my browser. or i can expose it using a load balancer. to do it I edit its YAML with `kubectl edit svc jaeger-query -n istio-system` changin the CLusterIP service to LoadBalancer. this will spin a LB for us
+* i check service in istio-system, to get LB url for ingress. i curl on the hello endpoint to trigger the gateway and create trace `curl ad5b538db06cd11e9b35b02189daa8eb-1631276472.eu-central-1.elb.amazonaws.com/hello`
+* i get the URL of the jaeger query and the port and hit it from my browser `http://add57e8b606cd11e9b35b02189daa8eb-1313036486.eu-central-1.elb.amazonaws.com:16686/search`
+* i see the ui . i select hello service and search the traces. i get nice performanc emetrics
+* i click dependencies => DAG ans see the service mesh in a noce diagram
+
+### Lecture 120 - Istio's Grafana Metrics
+
+* i see the services of istion system with `kubectl get svc -n istio-system -o wide` we see grafana. we edit its config changin from CLusterIp to LoadBalancer (we should enforce some rules for authentication)
+* i check services again see the uri of LB and visit it with browser to see the grafana dashboard (after creating some traffic)
+
+### Section 8 - Installing Kubernetes using kubeadm
+
+### Lecture 121 - Introduction to kubeadm
+
+* kubeadm is a toolkit by Kubernetes to create a cluster
+* can be used to spin a cluster on bare metal
+* it works on any deb / rpm compatible Linux OS. e.g Ubuntu. Debian, Redhat, CentOS
+* this is the core advantage of kubeadm. as a lot of tools a re OS/Cloud specific
+* it is very easy to use. let us spin up our k8s cluster in minutes
+* kubeadm supports bootstrap tokens (simple tokens used to create a cluster or join nodes later on)
+* tokens ar ei a format (abcdef.0123456789abcdef)
+* kubeadm suports upgrading/downgrading clusters
+* it does not install a networking solution!!! we have to install a CNI (Container Network Interface) compliant network solution ourselves using kubectl apply
+* Prereq: 
+	* deb/rpm compatible system (or CoreOS Container Linux)
+	* 2 GB of memory
+	* 2 CPUs for the master node
+	* Network connectivity between the nodes: private network(internal IP addresses) or public routable insternet IP addresses (in this case its best to use a firewall to only allow access within the cluster and to the users)
+	* at least 2 nodes (one master node and one normal node)
+* in the demo we will use digital ocean to spin up droplets
+
+### Lecture 122 - Demo: kubeadm (part I)
+
+* login in DigitalOceanb and launch 2 2gb/1cpu droplets named kubernetes-master and kubernetes-nose-01 and givethem a tag (kubernetes-cluster)
+* i use my ssh keys from vagrant vm and dev machine
+* the tag is useful for firewall setup oin public networks
+* in networking firewall i will create a firewall
+	* All tcp  from myip (see ifconfig.co)
+	* all tcp from sources=kubernetes-cluster
+	* all udp from sources=kubernetes-cluster
+	* i apply it to kubernetes-cluster
+
+### Lecture 123 - Demo: kubeadm (part II)
+
+* my droplets are up
+* from host (dev machine) i ssh to the master node on DO ` ssh 104.248.242.79 -l root -i ~/.ssh/id_rsa`
+* i do the same for the other node
+* in the master we git clone the tutors repo https://github.com/wardviaene/on-prem-or-cloud-agnostic-kubernetes
+* we do the same on the node
+* we see the script to install the master with kubeadm in scripts/install-kubernetes.sh. this script: installs docker, installs kubernetes and deploys kubernetes using calico. it gives a range of ips to the pod to use
+* we run the script (if we run on a small dropelt we should add  --ignore-preflight-errors=all to kubeadm init)
+* in node we run the scripts/install-node.sh script (docker, kubectl and kubeadm)
+* after scripts pass we cp the join command with the token from master to node(s) `kubeadm join 104.248.242.79:6443 --token <TOKEN> --discovery-token-ca-cert-hash sha256:<HASH>` to join
+* we run kubectl on master node and we see the nodes
+* to create a user we run the script /scripts/create-user.sh: it adds an ubuntu user in group ubuntu added to , create a home dir cp the ssh keysadmis, give ownership rights to its folders and give the ability to run sudo to becoime root. also it creates .kube dir and cp the admin.conf giving hiom admin rights to the cluster
+* we run it on master. we logout and login to master with -l ubuntu
+* we cp the first part of create-user.sh and run it on node so we can login as ubuntu on node
+* i run `kubectl run helloworld --image=k8s.gcr.io/echoserver:1.4 --port=8080` and a pod is created on node
+* i expose the deployment sing nodeport `kubectl expose deployment helloworld --type=NodePort`
+* i curl from host to node using the nodport port and see the echo. my cluster is working
