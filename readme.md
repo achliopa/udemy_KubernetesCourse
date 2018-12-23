@@ -1,7 +1,7 @@
 # Udemy Course - Learn Devops: The complete Kubernetes Course
 
 * [Course](https://www.udemy.com/learn-devops-the-complete-kubernetes-course/)
-* [Repository]()
+* [Repository](https://github.com/wardviaene/kubernetes-course)
 
 ## Installation Procedure
 
