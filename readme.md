@@ -2110,6 +2110,21 @@ kubeless function deploy uppercase --runtime nodejs6 \
 * we create a new cluster `kops create cluster --name=k8s.agileng.io --state=s3://kops-state-4213432 --zones=eu-central-1a --node-count=2 --node-size=t2.medium --master-size=t2.micro --dns-zone=k8s.agileng.io`
 * we use medium for nodes. t2.micro provides 2gb of mem while medium provides 4gb. istio needs memory on nodes
 * we look at README.md
+```
+ kubeAPIServer:
+    admissionControl:
+    - NamespaceLifecycle
+    - LimitRanger
+    - ServiceAccount
+    - PersistentVolumeLabel
+    - DefaultStorageClass
+    - DefaultTolerationSeconds
+    - MutatingAdmissionWebhook
+    - ValidatingAdmissionWebhook
+    - ResourceQuota
+    - NodeRestriction
+    - Priority
+```
 * we need to edit the cluster adding a buch of options to APIserver admission control `kops edit cluster k8s.agileng.io --state=s3://kops-state-4213432` and update cluster
 * we download istio
 ```
@@ -2190,7 +2205,7 @@ cd istio-1.0.5 # change 1.0.2 in your version
 * we apply istio deploment `kubectl apply -f <(istioctl kube-inject -f helloworld-tls.yaml)`
 * we apply legacy deployment `kubectl create -f helloworld-tls-legacy.yaml`
 * we check the services in istio-system namespace. we see out loadbalancer link.
-* we use `curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com -H "hello-tls.example.com"` and "hellott-tls.reverse.com"
+* we use `curl a15ad193c056711e9a449026433c079f-959651860.eu-central-1.elb.amazonaws.com -H "hello-tls.example.com"` and "hello-tls.reverse.com"
 * we see another script helloworld-tls-enable.yaml . it applies a meshpolicy MTLS (Mutual TLS). when we apply it. anything that does not use tls in clusterr wont be reachable (except where we DISABLE it in the script)
 * we need toi enamble it in helloworld-tls.yaml and appl;y ISTION_MUTAL trafficPolicy. without that when mutual TLS is activated traffic from ingfress wont reach the app. legacy deployments (no istio) woth be reachable from ingress unless we deiasable tls
 * when we enable Mutual TLS istio pods can comm legacy pods . legaacy pods cannot comm istio pods
@@ -2229,5 +2244,114 @@ rules:
 
 ### Lecture 115 - Demo: RBAC with Istio
 
-* we delete previous eployments
-* in kubernetes-cluster/istio
+* we delete previous deployments
+* in kubernetes-cluster/istio we look in helloworld-rbac-emnable.yaml, it configs a RbacConfig CRD on default namespace. it ensures Mutual TLS is enabled. it creates a DestinationRule to enable MTLLS on other namespaces an Api-server
+* helloworld-rbac.yaml includes deployments and services oh helloworld app and ServiceRoles and ServiceRoleBindings using properties (istio-system namespace). we use account hellow attached to the  hello service and give it access to the worl-viewer so that it can access the world service. a world service acount will be bound to the world pod to contact world-2 service (world-2-viewer role)
+* we apply helloworld-rbac-enable.yaml and `kubectl apply -f <(istioctl kube-inject -f helloworld-rbac.yaml)`
+* we see the pods of app in cluster. with rbac rules if i log in to world pod i wont be able to contact hello pod
+* i check services in istio-system namespace. get elb url and hit it with curl setting -H "host: hello-rbac.example.com" it works
+* i log in to a pod `kubectl exec -it world-2-fsfsakkhk-rewr -- sh` we use `wget hello:8080` we get 403 forbidden
+
+### Lecture 116 - End-user authentication with Istio (JWT)
+
+* we ve seen service-to-service communication
+	* how to enable mutual TLS dor service-to-service authentication
+	* after having strong identities using the x.509 certificates the MutualTLS provides, we saw how to use RBAC
+* for end-user-to-service  authentication Istio uses JWT tokens to authenticate end-users
+* JWT (JSON Web Tokens) is an openstandard to represent claims securely between two paries [JWT](https://jwt.io/)
+* In our implementation. we'll receive a JWT token from an auth server after logging in
+* The app will provide a token signed by a key
+* Data is not encrypted, but token contains a signature, tht can be verified to see whether it was really created by the server
+* JWT is a hash made up f 3 parts divided by a dot: first part contains the headers, second contains the payload, third is a signature based on the haeaders+payload
+* in https://jwt.io we can decode a token to see its contents
+* in webapps using authentication, the server can issue a JWT token when the user is authenticated
+* in JWT payload, data can be storted (username,groups etc)
+* the info can be used later in the app when users send new requests
+* if the signature in the token is valid. the JWT is valid and its data usable
+JWT can be use as alternative to server sessions. in this case some session data are stored at the client
+* using microservices every app would have to be separately configured
+* every service will need to validate the token. once validated the service needs to check whether user has access to the service (authorization)
+* with istio this functionality is taken out of the app code and managed centrally
+* we can configure the jwt token signature/properties we expect in istio and create policies to allow/forbid access to the service. e.g (hello app can only be accessed if user is authenticated). the sidecar will verify the validity of the signature to make sure token is valid
+* How it works:
+	* client comms with the app (istio ingress)
+	* comm is directed to the envoy proxy container in the hello-auth app pod. 
+	* user accesses the /login URI which is handled by the envoy proxy
+	* envoy proxy will reply with JWT token to istio-ingress
+	* Jwt token returns to client. he can use it to access hellow app (though the envoy proxy)
+	* envoy proxy will validate jwt token first
+	* hello app envoy proxy has the public key. it needs it to validate the jwt. the private key is stored only in hello-auth app (auth server) RSA encryion
+	* hello app envoy proxy to know the public keyit needs to download it first. this is doen through istio (it asks and get the url). this info is hardcoded in YAML Policy CRD
+	```
+	- jwt:
+	    issuer: "http-echo@http-echo.k8s.agileng.io"
+	    jwksUri: "http://auth.k8s.agileng.io/.well-known/jwks.json"
+	  principalBinding: USE_ORIGIN
+	```
+	* jwks is the key store and hello app envoy proxy gets it from hello-auth envoy proxy
+
+### Lecture 117 - Demo: End-user  authentication with istio (JWT)
+
+* we start with an empty kubernetes cluster with istio enabled
+```
+kops create cluster --name=k8s.agileng.io --state=s3://kops-state-4213432 --zones=eu-central-1a --node-count=2 --node-size=t2.medium --master-size=t2.micro --dns-zone=k8s.agileng.io
+kops update cluster k8s.agileng.io --yes --state=s3://kops-state-4213432
+kops edit cluster k8s.agileng.io --state=s3://kops-state-4213432
+# add in specs
+ kubeAPIServer:
+    admissionControl:
+    - NamespaceLifecycle
+    - LimitRanger
+    - ServiceAccount
+    - PersistentVolumeLabel
+    - DefaultStorageClass
+    - DefaultTolerationSeconds
+    - MutatingAdmissionWebhook
+    - ValidatingAdmissionWebhook
+    - ResourceQuota
+    - NodeRestriction
+    - Priority
+# END of add
+kops update cluster k8s.agileng.io --yes --state=s3://kops-state-4213432
+### ONLY DO IT IF istioctl is not present
+cd ~
+curl -L https://git.io/getLatestIstio | sh -
+echo 'export PATH="$PATH:/home/vagrant/istio-1.0.5/bin"' >> ~/.profile # change 1.0.2 in your version
+cd istio-1.0.5 # change 1.0.2 in your version
+###
+kubectl apply -f ~/istio-1.0.5/install/kubernetes/helm/istio/templates/crds.yaml
+kubectl apply -f ~/istio-1.0.5/install/kubernetes/istio-demo.yaml
+```
+* in kubernetes-course/istio we have helloworld-jwt.yaml: it adds a gateway and a virtualservice for auth. he uses a real hostname auth.k8s.agileng.io. a second virtualservice for the app (hello). a deployment for auth pod and a service. a second deployment for hello app + its service. it enables mtls(mutualTLS) + its rules
+* we execute the script `kubectl apply -f <(istioctl kube-inject -f helloworld-jwt.yaml)`
+* we check the new pods `kubectl get pods` 2 . auth and hello
+* we need to add rules in ROute53 for 2 new URIs. the only avaialble ELB is for auth. so we use it in auth.k8s.agileng.io
+* we have not enabled user authentication so we should be able to access pods
+* we see svc in istio-system to grab url `kubectl get svc -o wide -n istio-system`
+* we hit hello app unauthenticated `curl ad5b538db06cd11e9b35b02189daa8eb-1631276472.eu-central-1.elb.amazonaws.com -H "host:hello.k8s.agileng.io"`
+* we want to enable jwt. we use the ready script helloworld-jwt-enable.yaml it has a new policy setting the jwt (issuer, jwks uri) we mod so it reflects our cluster
+* we apply it `kubectl create -f hellowworld-jwt-enable.yaml`
+* no i cannot access hello (origin authentication failed)
+* we hit auth to login passing login name ` curl http://auth.k8s.agileng.io/login -d '{"login":"sakis"}'` we get back a token
+* i will use the token to acess the hello service `curl ad5b538db06cd11em -H "host: hello.k8s.agileng.io" -H "Authorization: Bearer $TOKEN"`
+* we visit the jwks.json (token repo) in our cluster `curl http://auth.k8s.agileng.io/.well-known/jwks.json`
+* it stores the public key. Istio uses it to validate the signature of token 
+* to see the key in plain text `auth-7c9f456644-dct7w` cp public.pem in jwt.io and see the JWT verified
+* we can view the logs of the pods for debug
+
+### Lecture 118 - Demo: Istio Egress Traffic
+
+* we see an example where hello pod in our cluster wants to reach out to an external service out of the cluster
+* once the hello container contacts an external service it will reroute traffic to the envoy proxy. 
+* the envoy proxy will then by default not route any traffic to the external service. we have to enable it on a per server basis.
+* on an empty cluster we launch aplain helloworld app `kubectl apply -f <(istioctl kube-inject -f helloworld.yaml)
+* we now have the 3 pods in 3 replicas
+* i will try to access an external service (istio will block it)
+* i log to one pod `kubectl exec -it hello-9fc777b46-b7lzq -- sh` and access world-2 pod `wget world-2:8080`. it works
+* i access `www.google.com` and get an error.
+* in external-service.yaml i have a ServiceEntry CRD with which i can set server to allow egress comm to ifconfig.co (1 for http 1 for https)
+* i repeat the process and i can contact the uri from inside the pod
+
+### Lecture 119 - Demo: Distributed Tracing with Jaeger
+
+* 
