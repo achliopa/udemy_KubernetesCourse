@@ -2419,3 +2419,10 @@ kubectl apply -f ~/istio-1.0.5/install/kubernetes/istio-demo.yaml
 * i run `kubectl run helloworld --image=k8s.gcr.io/echoserver:1.4 --port=8080` and a pod is created on node
 * i expose the deployment sing nodeport `kubectl expose deployment helloworld --type=NodePort`
 * i curl from host to node using the nodport port and see the echo. my cluster is working
+
+## Section 10 - On-Prem or Cloud Agnostic Kubernetes
+
+### Lecture 124 - Managing TLS Certs with Cert-Manager
+
+* We will follow this sec of lectures on the dedicated course 
+
